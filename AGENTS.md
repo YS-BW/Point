@@ -9,6 +9,7 @@
 3. [验证状态](docs/design/verification-status.md)：所有数字与时点的唯一口径。
 4. [AG-UI 协议评估](docs/design/protocol-agui.md)：客户端协议的决定与边界。
 5. [设计总览](docs/design/README.md)：产品与架构决定。
+6. [Agent Team 方案](docs/team/agent-team.md)：角色、分支、评审、闸门与协作循环（提案，待人类确认）。
 
 ## 当前阶段
 
