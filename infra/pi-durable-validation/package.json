@@ -1,0 +1,27 @@
+{
+  "name": "point-pi-durable-validation",
+  "private": true,
+  "type": "module",
+  "description": "Point: persistent Pi Durable service, thin CLI, and process-crash validation",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "cli": "node src/cli.mjs",
+    "sink": "node src/sink.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:real": "node test/real-model.mjs",
+    "test:steel": "node test/browser-real.mjs",
+    "setup:webrtc": "node scripts/setup-webrtc.mjs",
+    "test:webrtc": "node test/webrtc-real.mjs",
+    "check": "node scripts/check.mjs",
+    "backup": "node scripts/backup.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0",
+    "puppeteer-core": "25.14.0"
+  }
+}

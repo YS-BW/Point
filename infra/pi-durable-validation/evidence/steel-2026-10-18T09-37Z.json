@@ -1,0 +1,52 @@
+{
+  "steel": "http://127.0.0.1:3000/v1",
+  "fixture": "http://host.docker.internal:59560/",
+  "runDirectory": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-18T09-37-38-602Z",
+  "tests": [
+    {
+      "name": "Real forms, stale references, single-instance isolation, handoff, same-session restart and login restoration",
+      "status": "passed",
+      "ms": 3691,
+      "originalSession": "443fd9c6-df3f-4473-9f96-42af4a6b858b",
+      "screenshot": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-18T09-37-38-602Z/7cc0e157-efe7-406f-9cd2-22a46b5a4d35/workspace/browser-a7ceaee9-8662-44dc-b328-063ab9a3fcfd-0b58679d-3e75-4273-9dc7-b323aebfc817.png",
+      "restoredSession": "03605f87-7187-4bff-9dd7-53cca05811a6"
+    },
+    {
+      "name": "SIGKILL after session creation adopts the reserved session instead of creating a duplicate",
+      "status": "passed",
+      "ms": 1300,
+      "sessionId": "264bdcc6-c4c8-4a43-9da5-1fbba4f8be28"
+    },
+    {
+      "name": "SIGKILL after a real form submission requires observation and reconciliation without a second submission",
+      "status": "passed",
+      "ms": 1645,
+      "externalEffects": 1,
+      "sessionId": "21506f52-f5ff-4e9f-9e0a-72c50872e05a"
+    },
+    {
+      "name": "Idle leases release the browser and cancelling its owning job releases only that browser",
+      "status": "passed",
+      "ms": 5754,
+      "cancelledJob": "5584ec67-80ff-47d8-a78b-5b6b9549513d"
+    },
+    {
+      "name": "Real DeepSeek follows a natural browser task through the Durable tool loop",
+      "status": "passed",
+      "ms": 6891,
+      "model": {
+        "provider": "deepseek",
+        "modelId": "deepseek-flash"
+      },
+      "thinkingLevel": "high",
+      "tools": [
+        "browser_open",
+        "browser_act",
+        "browser_act",
+        "browser_close"
+      ],
+      "externalEffects": 1,
+      "reply": "操作已经完成。\n\n- 打开页面 `http://host.docker.internal:59560/`（标题：Point Steel acceptance）\n- 在 Note 输入框填入：`natural-327e5903-a6a1-4674-96af-6841d916b872`\n- 点击 Save note\n- 页面确认信息显示：原来的 “Not saved” 变为 **“Saved: natural-327e5903-a6a1-4674-96af-6841d916b872”**，输入框中的内容仍保留\n- 浏览器已关闭\n\n页面上的 Storage 值（stored-0.7005917433830345）是页面自带的存储标识，与本次保存无关。"
+    }
+  ]
+}

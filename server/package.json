@@ -1,0 +1,25 @@
+{
+  "name": "point-server-prototype",
+  "private": true,
+  "type": "module",
+  "description": "Point Server 验证工程：用 Pi SDK + 扩展验证无终端运行、上下文、子 Agent、调度、决策与恢复",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "check": "node --check src/session-service.mjs && node --check src/faux.mjs && node --check src/runner.mjs",
+    "var": "node --test test/",
+    "t1": "node test/01-headless-session.mjs",
+    "t2": "node test/02-restart-continue.mjs",
+    "t3": "node test/03-stop-semantics.mjs",
+    "t4": "node test/04-ui-contract.mjs",
+    "test": "node test/run-all.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0",
+    "typebox": "1.4.0"
+  }
+}

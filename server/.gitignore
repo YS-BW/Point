@@ -1,0 +1,11 @@
+node_modules/
+.pi/agent/models-store.json
+# 凭据：绝不提交
+.pi/agent/auth.json
+
+# 运行时产物
+sessions/
+runtime/
+workspace/
+
+# 注意：package-lock.json 要提交 —— 插件/SDK 组合的结论必须可复现到具体版本。

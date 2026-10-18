@@ -1,0 +1,20 @@
+# 构建上下文排除：运行时数据、依赖、凭据、本机配置一律不进镜像
+.git
+.gitignore
+node_modules
+**/node_modules
+runtime
+**/runtime
+sessions
+**/sessions
+workspace
+**/workspace
+.research
+.env
+**/.env
+**/.pi/agent/auth.json
+**/.pi/agent/models.json
+.DS_Store
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

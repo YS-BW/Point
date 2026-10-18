@@ -1,0 +1,39 @@
+schema: spec-driven
+
+context: |
+  Point 是只服务一个人的持续运行 personal agent，产品参考 Muse 的主会话、主题侧聊与后台工作。
+  2026-10-18 已定：Pi Durable 是 Agent 层，复用原生 loop、上下文/压缩、工具、持久任务与恢复；不并行引入 Pi coding-agent SDK 等第二套执行引擎。
+  Steel 是独立浏览器基础设施，默认拉取 ccr.ccs.tencentyun.com/ys-bw-steel/steel-browser-webrtc 的已验证固定 digest，配置以 infra/pi-durable-validation/steel/docker-compose.yml 为准；不要求拉源码或本地构建。GHCR 仅为备用镜像源。
+  Point 负责会话关系、产品任务/目标、记忆策略、结果路由、通知和浏览器控制权，通过 Durable extension/task/document 实现，不重写 Agent loop 或上下文引擎。
+  当前设计以 docs/design/ 为准；infra/pi-durable-validation/ 是后续实现基础，server/ 仍为旧 SDK 验证工程。区分目标设计、已验证原型与待迁移实现，原生 RTC 播放器的 Point 接管校验尚未完成。
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

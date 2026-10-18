@@ -1,0 +1,40 @@
+# --- 操作系统 ---
+.DS_Store
+Thumbs.db
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+.yarn/
+.pnpm-store/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+webrtc-venv/
+
+# --- 凭据与本地配置：绝不提交 ---
+.env
+.env.*
+!.env.example
+**/.pi/agent/auth.json
+**/.pi/agent/models.json
+!**/.pi/agent/models.example.json
+
+# --- 运行时数据与产物（可再生产；验收证据见 infra/pi-durable-validation/evidence/）---
+runtime/
+sessions/
+workspace/
+backups/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# --- 调研素材：本地保留，不入库 ---
+.research/
+
+# --- 临时文件 ---
+*.tmp
+*.bak
+*.log

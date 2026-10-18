@@ -1,0 +1,32 @@
+{
+  "uiSaved": true,
+  "media": {
+    "peers": 2,
+    "sources": 1,
+    "pid": 94481
+  },
+  "stats": {
+    "framesDecoded": 14,
+    "bytesReceived": 73541,
+    "width": 1280,
+    "height": 713,
+    "codec": "video/VP8",
+    "kbps": 0
+  },
+  "workerRestartRecovered": {
+    "media": {
+      "peers": 1,
+      "sources": 1,
+      "pid": 94545
+    },
+    "stats": {
+      "framesDecoded": 15,
+      "bytesReceived": 84592,
+      "width": 1280,
+      "height": 713,
+      "codec": "video/VP8",
+      "kbps": 0
+    },
+    "connection": "connected"
+  }
+}

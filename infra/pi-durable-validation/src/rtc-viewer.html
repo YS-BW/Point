@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Point · 浏览器</title>
+<style>
+  :root{font:14px/1.6 system-ui,sans-serif;color:#e7eaf0;background:#101318;color-scheme:dark}*{box-sizing:border-box}body{margin:0}header{padding:16px 22px;border-bottom:1px solid #2a303a;display:flex;gap:16px;align-items:center;flex-wrap:wrap}h1{font-size:17px;margin:0}#status{color:#a8b5c7;flex:1}button{background:#272f3c;color:inherit;border:1px solid #465064;border-radius:7px;padding:7px 13px;cursor:pointer}button:disabled{opacity:.4;cursor:default}#take{background:#276b58;border-color:#3c957e}main{max-width:1324px;margin:20px auto;padding:0 22px}#page{color:#9baabe;overflow-wrap:anywhere;margin:0 0 12px}#screen{min-height:200px;background:#080a0d;border:1px solid #303946;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}video{display:none;width:auto;max-width:100%;max-height:max(160px,calc(100dvh - 245px));height:auto;outline:none;cursor:default}video.control{cursor:crosshair;outline:2px solid #55b895;outline-offset:-2px}#empty{padding:48px;text-align:center;color:#a6b2c2}footer{display:flex;gap:10px;align-items:center;padding:12px 0;color:#8b9aae;flex-wrap:wrap}#text{flex:1;min-width:150px;background:#1b212c;color:inherit;border:1px solid #465064;padding:9px;border-radius:7px}#error{color:#ffba98;min-height:24px;margin:8px 0}#metrics{font-variant-numeric:tabular-nums}a{color:#80cbb8}
+</style>
+<header><h1>Point 浏览器</h1><span id="status">等待连接</span><button id="reconnect">重新连接</button><button id="take" disabled>接管</button><button id="resume" disabled>交回 Agent</button></header>
+<main><p id="page">等待 Agent 打开网页</p><div id="screen"><div id="empty">在 CLI 中让 Agent 打开网页，画面会自动出现在这里。</div><video id="video" autoplay muted playsinline tabindex="0" aria-label="远程浏览器画面"></video></div>
+<footer><span id="metrics">WebRTC</span><span id="input-state" role="status">输入通道未连接</span><input id="text" type="text" autocomplete="off" placeholder="接管后可在这里发送中文或粘贴文字" aria-label="发送到远程页面的文字" disabled><button id="send" disabled>发送文字</button></footer><p id="error" role="status"></p></main>
+<script type="module" src="/browser/rtc-viewer.mjs"></script>
+</html>

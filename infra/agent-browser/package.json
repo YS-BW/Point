@@ -1,0 +1,12 @@
+{
+  "name": "agent-browser-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node agent-demo.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^23.11.1",
+    "ws": "^8.18.0"
+  }
+}

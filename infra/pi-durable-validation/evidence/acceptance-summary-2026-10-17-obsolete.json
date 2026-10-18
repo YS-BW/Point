@@ -1,0 +1,13 @@
+{
+  "localDate": "2026-10-18",
+  "testsPassed": 24,
+  "testsTotal": 24,
+  "criticalCrashCases": 70,
+  "realModel": "passed",
+  "model": "deepseek/deepseek-flash",
+  "liveUpgrade": "passed",
+  "preservedHistoryEntries": 10,
+  "executionEvidence": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-17T19-06-13-971Z",
+  "conversationEvidence": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-17T19-05-58-506Z",
+  "realModelEvidence": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-17T19-05-58-477Z/real-model"
+}

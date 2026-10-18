@@ -1,0 +1,47 @@
+{
+  "status": "passed",
+  "model": "deepseek/deepseek-flash",
+  "ms": 25463,
+  "dataDirectory": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-18T04-54-11-562Z/real-model",
+  "mainToolCalls": [
+    "write",
+    "read",
+    "remember"
+  ],
+  "workerToolCalls": [
+    "write",
+    "read"
+  ],
+  "jobId": "7787ad0b-5f52-42ef-8b68-876c7421a86a",
+  "chatId": "b9a9cff2-345e-4ba2-9239-87f7afa239db",
+  "workerConversationId": 51,
+  "calculation": "A+B=105",
+  "resultFile": "calculation-37723d07-3987-44e0-9e3c-774e13539d99.txt",
+  "artifact": "7787ad0b-5f52-42ef-8b68-876c7421a86a.md",
+  "sharedMemory": true,
+  "inheritedTaskContext": true,
+  "mainUnderstandsResult": true,
+  "shareToMain": true,
+  "modelFollowup": true,
+  "survivesRestart": true,
+  "usage": {
+    "models": {
+      "deepseek/deepseek-flash": {
+        "input": 11704,
+        "output": 2660,
+        "cacheRead": 35456,
+        "cacheWrite": 0,
+        "reasoning": 945,
+        "totalTokens": 49820,
+        "cost": {
+          "input": 0.0035112,
+          "output": 0.0031919999999999995,
+          "cacheRead": 0.000212736,
+          "cacheWrite": 0,
+          "total": 0.006915936
+        }
+      }
+    },
+    "tools": {}
+  }
+}

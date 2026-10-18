@@ -1,0 +1,16 @@
+{
+  "name": "point-dsh-validation",
+  "version": "1.0.0",
+  "description": "Isolated DSH SDK integration validation; not the Point runtime",
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "verify": "node verify.mjs",
+    "crash": "node crash.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sdk-client": "0.2.1-rc.2"
+  },
+  "private": true,
+  "type": "module"
+}

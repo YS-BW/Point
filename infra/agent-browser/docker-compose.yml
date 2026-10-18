@@ -1,0 +1,54 @@
+services:
+  # Browser infrastructure: Chrome + CDP + session pool + the live screencast streamer.
+  steel:
+    image: ghcr.io/steel-dev/steel-browser:latest
+    container_name: steel
+    restart: unless-stopped
+    shm_size: 2gb
+    ports:
+      - "3000:3000" # REST API + session websockets (agents connect here over CDP)
+      - "9223:9223" # raw Chrome DevTools (the in-UI DevTools tab)
+    environment:
+      # Without this, session.websocketUrl / sessionViewerUrl come back as 0.0.0.0
+      # and the viewer cannot connect. Set it to however you reach the API.
+      - DOMAIN=${DOMAIN:-localhost:3000}
+      - CDP_DOMAIN=${CDP_DOMAIN:-localhost:9223}
+      - LOG_LEVEL=${LOG_LEVEL:-warn}
+      - ENABLE_CDP_LOGGING=${ENABLE_CDP_LOGGING:-false}
+      # Egress. Docker Desktop silently injects your macOS system proxy into every
+      # container, which makes behaviour depend on whether your local proxy is up.
+      # We override it explicitly:
+      #   BROWSER_PROXY=http://host.docker.internal:7897   # route the browser through a local proxy
+      #   BROWSER_PROXY=                                   # direct egress (default)
+      - HTTP_PROXY=${BROWSER_PROXY:-}
+      - HTTPS_PROXY=${BROWSER_PROXY:-}
+      - http_proxy=${BROWSER_PROXY:-}
+      - https_proxy=${BROWSER_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,steel,steel-ui
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # The viewer you look at. Its entrypoint renders /etc/nginx/nginx.conf.template,
+  # substituting __API_URL__ — so API_URL is mandatory or nginx refuses to start
+  # ("invalid URL prefix"). It proxies both /api/ and /ws/ to the API.
+  steel-ui:
+    image: ghcr.io/steel-dev/steel-browser-ui:latest
+    container_name: steel-ui
+    restart: unless-stopped
+    depends_on:
+      steel:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    environment:
+      - API_URL=http://steel:3000

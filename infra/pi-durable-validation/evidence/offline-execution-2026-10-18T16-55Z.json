@@ -1,0 +1,413 @@
+{
+  "version": "1.3.0",
+  "model": "faux/faux-1",
+  "crashRoundsPerPoint": 10,
+  "runDirectory": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-18T16-55-33-796Z",
+  "tests": [
+    {
+      "name": "CLI uses real tools, deduplicates input, and retains preferences/history after SIGKILL",
+      "status": "passed",
+      "ms": 612,
+      "submissionId": 27
+    },
+    {
+      "name": "CLI exits while background work continues and main chat remains usable",
+      "status": "passed",
+      "ms": 969,
+      "jobId": "88ce9bb3-5431-4fa5-8b21-fe1c8d797e40"
+    },
+    {
+      "name": "A revision reuses its child conversation and only publishes the newest answer",
+      "status": "passed",
+      "ms": 1004,
+      "conversationId": 9
+    },
+    {
+      "name": "Stopping main chat preserves background jobs; cancelling one job leaves another alone",
+      "status": "passed",
+      "ms": 745
+    },
+    {
+      "name": "A timer missed during downtime catches up once and remains done after another restart",
+      "status": "passed",
+      "ms": 946,
+      "reminderCount": 1
+    },
+    {
+      "name": "Rescheduling invalidates the old timer; cancellation survives restart",
+      "status": "passed",
+      "ms": 1412
+    },
+    {
+      "name": "SIGKILL at tool/model/artifact/report boundaries recovers the same work without duplicate reports",
+      "status": "passed",
+      "ms": 16099,
+      "cases": [
+        {
+          "point": "tool-after-effect",
+          "round": 1,
+          "jobId": "a7812b34-c1b5-416e-a9e9-443ed7a93f4e",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 2,
+          "jobId": "d35d6b46-d7d3-4932-ad20-41d543d87c1c",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 3,
+          "jobId": "7c47a2c9-157d-42f7-a434-ad286969d454",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 4,
+          "jobId": "05f63f6e-5bb0-48d8-886e-a8bb8dd279be",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 5,
+          "jobId": "75b2ba0a-27f9-4d06-90dc-8587a3d717db",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 6,
+          "jobId": "58b44593-5b78-4370-a5aa-9195e0eeaa92",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 7,
+          "jobId": "6a3d1a49-8032-4dbd-8ebb-211b88d61ad3",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 8,
+          "jobId": "2de79dc8-39b3-4b04-87b9-b8b0bb678371",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 9,
+          "jobId": "ff06a6cf-9fce-4dd9-b88f-83f48b660ac0",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "tool-after-effect",
+          "round": 10,
+          "jobId": "8196f465-0e05-412d-ae58-4ef63d35a67f",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 1,
+          "jobId": "f12bfd5a-77ea-4945-8e3a-c00d59d7cfe2",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 2,
+          "jobId": "b07fa97a-cce3-4977-9e2f-1375f6bb0d60",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 3,
+          "jobId": "fcac708b-0ba6-4f82-805c-102e8e0a5c62",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 4,
+          "jobId": "78514fe4-6931-456e-b137-3612bd0029b7",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 5,
+          "jobId": "0b84afbb-be02-4f46-bc63-8a8becb7e28b",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 6,
+          "jobId": "d91dfe37-744f-4a85-b1bd-fa890927dfb6",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 7,
+          "jobId": "fe530f57-e719-4bda-813d-219fa32f3ec6",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 8,
+          "jobId": "32dd2ff9-c704-4a84-ae68-9abc69f5730c",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 9,
+          "jobId": "07b00bda-d86b-4cbc-a5da-17b44b33c0a6",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-model",
+          "round": 10,
+          "jobId": "2714e585-d1fd-4346-b060-aa44723ee01b",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 1,
+          "jobId": "3705b0a8-5ab0-4f49-9b42-a98a9930eb62",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 2,
+          "jobId": "6d0908ac-2866-459c-80e6-5be0bf2e7e95",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 3,
+          "jobId": "ef54d91c-9227-4135-aee2-79af65267be9",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 4,
+          "jobId": "5fb7e1af-609b-48a7-9a31-34e2a6a188e7",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 5,
+          "jobId": "8cb1f534-d66d-437c-9df3-473c07cf9459",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 6,
+          "jobId": "a9aeddc8-d471-401a-afa1-642440f1b3c5",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 7,
+          "jobId": "836a1af4-5ad0-4398-a945-160745e64051",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 8,
+          "jobId": "aab7f5f8-7cc6-422c-8ea8-aa97b138a98b",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 9,
+          "jobId": "48da6c62-c291-4fc6-9de1-80e9f403a7e3",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "after-artifact",
+          "round": 10,
+          "jobId": "ed07ef5e-8bb9-4769-9bce-dc6a157763e6",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 1,
+          "jobId": "e1fb7068-761c-4cbc-9c21-d851f0704fb7",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 2,
+          "jobId": "8f42f35a-1fcd-4228-95b1-fdfae3f687a8",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 3,
+          "jobId": "7ebc835e-1571-457b-9af9-958a00b51a9a",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 4,
+          "jobId": "482a689d-1282-40bb-900e-04176c481f8e",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 5,
+          "jobId": "f52a7323-8145-4c7d-8622-5a34c2ffab35",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 6,
+          "jobId": "92da7230-1bc1-41ee-9611-edf1248a6992",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 7,
+          "jobId": "4a296875-1aff-4e5b-9831-f457dcd7032e",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 8,
+          "jobId": "21e3cce0-4a29-4c2d-9f43-e769d49ec9c0",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 9,
+          "jobId": "174f410c-330a-4f12-a9c6-96af601600d1",
+          "workerId": 8,
+          "reports": 1
+        },
+        {
+          "point": "before-report",
+          "round": 10,
+          "jobId": "36130948-1e78-412c-a4c3-feeed21667d0",
+          "workerId": 8,
+          "reports": 1
+        }
+      ]
+    },
+    {
+      "name": "Idempotent receiver keeps one external effect after crash between effect and acknowledgement",
+      "status": "passed",
+      "ms": 4060,
+      "cases": [
+        {
+          "round": 1,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 2,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 3,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 4,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 5,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 6,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 7,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 8,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 9,
+          "requests": 2,
+          "effects": 1
+        },
+        {
+          "round": 10,
+          "requests": 2,
+          "effects": 1
+        }
+      ]
+    },
+    {
+      "name": "Unsafe delivery becomes unknown after crash and does not silently send again",
+      "status": "passed",
+      "ms": 427,
+      "externalRequests": 1,
+      "deliveryStatus": "unknown"
+    },
+    {
+      "name": "State stream reconnects from a snapshot; duplicate data-directory owners are rejected",
+      "status": "passed",
+      "ms": 377
+    },
+    {
+      "name": "Tool failures cannot be turned into a successful job by a confident model answer",
+      "status": "passed",
+      "ms": 207
+    },
+    {
+      "name": "An unreachable receiver leaves delivery unknown rather than reporting success",
+      "status": "passed",
+      "ms": 206
+    },
+    {
+      "name": "Interactive CLI receives completion and follow-up events and can quit without stopping the daemon",
+      "status": "passed",
+      "ms": 533
+    }
+  ]
+}

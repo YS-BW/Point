@@ -1,0 +1,36 @@
+{
+  "tests": [
+    {
+      "name": "Real VP8/SRTP decoding, read-only denial, DataChannel pointer/text/space-key input, handoff/resume and peer cleanup",
+      "status": "passed",
+      "decodedFrames": 14,
+      "frame": {
+        "width": 1280,
+        "height": 713,
+        "pts": 79092,
+        "marker": [
+          0,
+          0,
+          255
+        ]
+      },
+      "dataChannel": "open",
+      "readOnlyDenied": true,
+      "saved": "WebRTC 数据通道 OK",
+      "videoShowsSavedState": true,
+      "videoFollowsNavigation": true,
+      "released": {
+        "peers": 0,
+        "sources": 0,
+        "pid": 15071,
+        "captures": []
+      }
+    },
+    {
+      "name": "Parent SIGKILL releases the media worker; Durable retains the same Steel session and navigated page",
+      "status": "passed",
+      "sessionId": "6ef7954d-890b-4d6c-afd3-18ba6d15af20"
+    }
+  ],
+  "runDirectory": "<home>/Projects/Doing/Point/infra/pi-durable-validation/runtime/tests-2026-10-18T10-06-22-727Z"
+}

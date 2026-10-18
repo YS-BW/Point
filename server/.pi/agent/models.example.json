@@ -1,0 +1,17 @@
+{
+  "providers": {
+    "faux": {
+      "baseUrl": "http://localhost:0",
+      "api": "faux",
+      "apiKey": "example-not-a-real-key",
+      "models": [
+        {
+          "id": "faux-1",
+          "name": "Faux Model",
+          "contextWindow": 200000,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}

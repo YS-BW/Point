@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-10-18T17:01:51.830Z",
+  "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
+  "files": [
+    {
+      "file": "offline-execution-2026-10-18T16-55Z.json",
+      "bytes": 10876,
+      "sha256": "6dc294c587d8d7ee5fd2889db3e21907f7416f32bc44f6f2613adf3255b05bcc",
+      "source": "runtime/latest-results.json",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "offline-conversations-2026-10-18T16-55Z.json",
+      "bytes": 5106,
+      "sha256": "fc41aecd7106c0c44d58986c91b0ea05d64f4c4da92e64aac2e7ef7e7219778e",
+      "source": "runtime/latest-conversation-results.json",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "real-model-2026-10-18T04-54Z.json",
+      "bytes": 1230,
+      "sha256": "eb79373e5cb58360ee140359b94b8ba5c440707cc0dbedd9663205406a013070",
+      "source": "runtime/real-model-results.json",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "steel-2026-10-18T09-37Z.json",
+      "bytes": 2447,
+      "sha256": "997236aa4daab60d39d99f46cccb22e04a2af350525bf9d5429175b21cb393ce",
+      "source": "runtime/steel-results.json",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "webrtc-2026-10-18T10-06Z.json",
+      "bytes": 1002,
+      "sha256": "ae227fa282929a7ebf3e42ce2bb51671d982652d282f7e203187fa2eee5ed980",
+      "source": "runtime/webrtc-results.json",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "webrtc-ui-2026-10-18T07-09Z.json",
+      "bytes": 549,
+      "sha256": "2d2e388bdfc454838acd704b4d731ea0c4318580436311141ce1fb7bc1c8da0b",
+      "source": "runtime/webrtc-ui-results.json",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "acceptance-summary-2026-10-17-obsolete.json",
+      "bytes": 601,
+      "sha256": "f4429c419fe6dc4fcd19f07582923d4a4aa0cd439e223965f4e987ce84458cb8",
+      "source": "runtime/acceptance-summary.json",
+      "normalized": "absolute home prefix -> <home>"
+    }
+  ]
+}

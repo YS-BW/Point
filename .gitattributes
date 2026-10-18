@@ -1,0 +1,14 @@
+* text=auto eol=lf
+
+# 证据与配置保持 LF，避免跨平台 diff 噪声
+*.json text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.py text eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.sqlite binary
+*.gz binary
+*.tgz binary
