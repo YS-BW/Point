@@ -31,7 +31,8 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 | [判断层](decision-layer.md) | 是否推进、是否询问、是否通知及评测 |
 | [投递层](delivery-layer.md) | 结果回到会话、客户端同步与外部通知 |
 | [验证状态](verification-status.md) | 唯一证据口径：数值、时点、证据路径、复现命令与未验证清单 |
-| [实施路线](roadmap.md) | 从原型到稳定底层的阶段、出口判据、并行与串行规则、风险决策门 |
+| [实施路线](roadmap.md) | Agent 优先的阶段、出口判据、并行与串行规则 |
+| [Agent 层架构基调](agent-core.md) | 十条不变量、完成定义（DoD）、边界图与"坐稳"验收清单 |
 | [ADR-001 Agent 层选型](adr/ADR-001-agent-layer-selection.md) | 两次选型反转的时间线、依据、未量化项与复核触发条件 |
 | [当前 Durable 原型](../../infra/pi-durable-validation/README.md) | 可运行入口、CLI、故障注入与真实 Steel 验收 |
 
@@ -53,9 +54,9 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 
 `infra/pi-durable-validation/` 是后续实现的基础，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`server/` 仍是旧 Pi SDK 验证代码，尚未迁移；本次调整的是设计与实施方向。
 
-优先把 Durable 原型整理为正式 Server，稳定 API、状态版本与恢复流程；随后接入 Web，并把 Steel 原生 RTC 播放器接入 Point 控制权检查。具体的阶段划分、出口判据与并行/串行规则见[实施路线](roadmap.md)。
+**当前优先级（2026-10-19 调整）**：先把 Agent 层坐稳——正式 Server 骨架、状态与事件契约、API v1、任务/上下文/记忆/投递的行为契约、常驻与长跑；**浏览器原生 RTC 集成暂缓**，只做止血与资源抽象。理由与顺序见[实施路线](roadmap.md)，必须遵守的约束见[Agent 层架构基调](agent-core.md)。
 
-**2026-10-19 补充事实**：原生 RTC 链路当前无鉴权，且并发 12–13 个未授权信令连接即可使 Steel 容器 panic 退出（`cmd/main.go:124` 并发写 WebSocket）；`3000` 的任意路径 WS 可直通 CDP。修复（WS 单写者、握手凭证、连接上限）已列为路线图 M3 的第一优先级，补丁前浏览器入口只应留在 loopback。
+**2026-10-19 补充事实**：原生 RTC 链路当前无鉴权，且并发 12–13 个未授权信令连接即可使 Steel 容器 panic 退出（`cmd/main.go:124` 并发写 WebSocket）；`3000` 的任意路径 WS 可直通 CDP。修复（WS 单写者、握手凭证、连接上限）列为浏览器轨道第一步，补丁前浏览器入口只应留在 loopback。
 
 长时间运行、模型供应商故障、周期计划、完整记忆与外部通知仍需产品级验收，不能由既有实验结果代替。
 

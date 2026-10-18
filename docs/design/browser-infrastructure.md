@@ -67,6 +67,8 @@ Point Client 与 Server 的 HTTP/SSE 承载聊天与产品状态，不承载浏�
 
 当前 fork 还有滚轮、特殊键/剪贴板、连接清理与多会话方面的待验收项。公网部署另需验证 ICE、TURN、TLS 与地址配置；本机连接成功不证明公网可用。
 
+**2026-10-19 实测阻断项（浏览器轨道暂缓期间的状态）**：原生链路的信令 WebSocket 无任何鉴权（伪造 Origin 仍握手成功），并发 12–13 个未授权 offer 即可触发 `panic: concurrent write to websocket connection`（`cmd/main.go:124`，ICE 候选回调与主循环并发写），使容器退出；`3000` 的任意路径 WS 可直通 CDP，`9323` 直接暴露 CDP，clipboard 动作存在命令拼接。**在此之前原生 RTC 不接入、不对外暴露**。处理顺序：WS 写串行化（P1）→ 收敛端口与重启策略（P2）→ 握手凭证/连接上限（P4）→ 再谈控制面集成。集成时机见[实施路线](roadmap.md)。
+
 ## 持久化与恢复
 
 | 情况 | 处理 |
