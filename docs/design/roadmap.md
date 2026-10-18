@@ -1,198 +1,146 @@
-# 实施路线（Agent 优先）
+# 实施路线（工作包制，不排时间）
 
-> 2026-10-19 修订。前一版把浏览器原生 RTC 放在并行轨道；本版按产品判断调整为：**先坐稳 Agent 层，浏览器暂缓**。
-> 基调与不变量见 [Agent 层架构基调](agent-core.md)；证据口径见[验证状态](verification-status.md)。
+> 2026-10-19 修订（第二版）：**不按周排期**。这个项目由人类与 agent 协作推进，进度用"工作包 + 闸门"衡量，而不是日历。
+> 约束见 [Agent 层架构基调](agent-core.md)；客户端协议见 [AG-UI 评估](protocol-agui.md)；证据口径见[验证状态](verification-status.md)。
 
-## 0. 为什么可以暂缓浏览器，以及暂缓的前提
+## 0. 推进方式
 
-**可以暂缓**：浏览器是外部依赖、能力可替换（Python 桥已验证接管互斥，原生媒体只是更优的实现路径），它不决定 Agent 的状态权威、任务语义或恢复契约。推迟它不会让 Agent 层停工。
-
-**但有一个前提**：现在必须把**外部资源抽象成"租约 + 适配器"**，让 Agent domain 只认识 `resource{owner, lease, controlEpoch, state}`，不认识 Steel/RTC/CDP。否则将来接原生 RTC 时，任务状态机、恢复流程、事件模型都要跟着改——**推迟就变成了延后返工**。
-
-暂缓期间只做两件事，不做集成：
-1. **止血**：Steel 容器的崩溃与暴露面（见 §6）。
-2. **抽象**：资源租约接口 + adapter 边界（属于 A1/A2 的工作包）。
+- **工作单元 = 工作包（WP）**：一个 WP 是一个可独立验收、可独立回滚的改动，对应一个分支/PR、一个 owner（人或 agent）。
+- **进度 = 闸门（G）**：过闸门才进入下一批工作。没有"第几周完成"这种东西，只有"依赖是否满足、判据是否通过"。
+- **并行 = 文件所有权互斥**：同一 lane 内串行，candidate lane 之间可以并行，前提是接口先冻结、写文件不重叠。
+- **人类负责判断，agent 负责实现**：见 §5 的协作协议。
 
 ## 1. "坐稳 Agent" 的定义
 
-不是把功能做大，而是让四类契约在 Agent 层可验证：
+四类契约可验证，而不是功能多：
 
-| 契约 | 内容 | 现状 |
+| 契约 | 内容 | 当前状态 |
 |---|---|---|
-| **状态** | 会话/任务/记忆/事件的唯一权威、版本与迁移 | 单文档 v1 + `??=` 补丁；无迁移框架；事件环形截断 |
-| **执行** | 任务生命周期、幂等、崩溃恢复、副作用三态 | 原型已有 70 次强杀证据，但绑定在验证工程里 |
-| **接口** | 稳定 ID、`/v1`、错误码、SSE 游标与重连 | 无版本；SSE 每次全量；错误只有字符串 |
-| **运营** | 单写者、常驻、日志、指标、备份、成本 | 单写者可靠；其余为零 |
+| 状态 | 会话/任务/记忆/事件的唯一权威、版本与迁移 | 单文档 v1 + `??=` 补丁；无迁移框架；事件环形截断 |
+| 执行 | 任务生命周期、幂等、崩溃恢复、副作用三态 | 原型有 70 次强杀证据，但绑定在验证工程里 |
+| 接口 | 稳定 ID、`/v1`、错误码、事件游标与重连、客户端协议 | 无版本；SSE 每次全量；错误只有字符串 |
+| 运营 | 单写者、常驻、日志、指标、备份、成本 | 单写者可靠；其余为零 |
 
-**完成标准**：一个任务从创建到结果回传，能在进程被强杀、依赖超时、模型答错、客户端断线四种情况下都被解释和恢复，且每个状态变更都有对应测试。
+## 2. 工作包清单
 
-## 2. 路线图
+依赖标注：`→` 表示必须在前一个完成后开始；`∥` 表示可并行。
+
+| WP | 内容 | 依赖 | 出口判据（可运行） | 修改范围 |
+|---|---|---|---|---|
+| **WP0** ✅ | 基线：仓库、证据入库、备份脚本、CI、凭据 | — | 全新克隆 `npm ci && check && test` 全绿 | 已完成 |
+| **WP1** | Server 骨架：`apps/server/src/{api,domain,runtime,adapters,storage}`；`service.mjs` 拆组合根 + tasks/domain；配置与数据目录固定；结构化日志骨架 | WP0 | 28 项离线测试在新结构全绿；`domain/` 无 `defineTask`；单测不 spawn 服务 | `apps/server/**`（新建） |
+| **WP2** | 资源抽象：`resource{owner,lease,controlEpoch,state}` 接口 + `adapters/resource`；文件/通知/浏览器统一"意图→执行→三态"；domain 不 import 具体实现 | WP1 | 同一接口能用内存桩跑通租约、过期、`unknown`；`grep` 证明 domain 无 steel/cdp | `apps/server/src/adapters/**`、`domain/**` |
+| **WP3** | 状态 v2 + 迁移：`point.meta/chats/chat/memory/job/jobs/browser/requests` 分片；事件改时间线；单 commit 迁移；升级前自动备份；版本闸门 | WP1（与 WP4 可并行，但**事务组唯一 owner**） | v1 夹具库升级语义等值；重启两次迁移幂等；恢复 pre-v2 快照可启动；请求账本有清扫 | `apps/server/src/storage/**`、`runtime/**` |
+| **WP4** | API v1 基础契约：`/v1`、错误码对象、所有写操作幂等键、`/inspect` 门控、鉴权、访问日志 | WP1 | 契约测试覆盖 400/404/409/413/503；重放响应逐字节相等 | `apps/server/src/api/**` |
+| **WP5** | AG-UI 投影：`POST /v1/agent`、run 生命周期、文本/工具/step 事件、`RUN_FINISHED.usage`、cancelled 语义 | WP4 | 契约测试：流以 `RUN_STARTED` 开头；未知事件被容忍；截断流不伪造 FINISHED；CLI 作为第一个消费者 | `apps/server/src/api/agui/**` |
+| **WP6** | 读模型 + 增量事件：`subscribeCommits` 投影；`STATE_SNAPSHOT/DELTA`、`MESSAGES_SNAPSHOT`、`ACTIVITY`、`CUSTOM`；线程流（自定义绑定 + `Last-Event-ID` + 同步 run）；运行流 | WP3、WP4、WP5 | 100 job/10 chat 夹具下 `/state` 的 `storage.task` 调用=0；单 commit 只发 O(变更) 帧；离线重连后状态/消息一致 | `apps/server/src/api/**`、`storage/**` |
+| **WP7** | Agent 行为加固：任务状态转移表（含非法转移）、artifact/deliver 的 revision 复检、上下文/压缩边界、记忆上限与遗忘、投递 `unknown` 核销、成本记录 | WP1、WP2（部分依赖 WP3） | 状态转移表 100% 覆盖；每类副作用都有 `unknown` 用例；一次任务可从事件重建 | `apps/server/src/domain/**`、`adapters/**` |
+| **WP8** | 常驻化与运维：Dockerfile + compose（restart/healthcheck/资源限制/卷/TZ/非 root）、日志保留、定时备份、指标（任务数/失败率/延迟/费用） | WP1 | 容器重启状态与计划无损；恢复演练通过；一次任务全链路可追溯 | `apps/server/Dockerfile`、`deploy/**`、`infra/**` |
+| **WP9** | 长期运行：7 天挂机、供应商故障退避、周期计划最小版、判断层最小规则、成本预算与告警 | WP6、WP7、WP8 | 7 天无泄漏/无丢计划/无陈旧通知；人为注入超时与限流可恢复 | `apps/server/**`、`docs/design/**` |
+| **WP10** | 浏览器止血（**冻结，不集成**）：Steel P1 补丁（WS 写串行化）、端口收敛、compose `restart`、文档标注；代码只修 bug | WP0 | 并发 12+ 连接不再 panic；崩溃回归用例通过；测试仍绿 | `infra/pi-durable-validation/**`（最小） |
+
+## 3. 依赖图与并行轨道
 
 ```mermaid
 flowchart LR
-    A0[A0 基线<br/>已完成] --> A1[A1 Server 骨架<br/>+ 资源抽象]
-    A1 --> A2[A2 状态 v2<br/>+ 事件时间线]
-    A1 --> A3[A3 API v1<br/>契约与幂等]
-    A2 --> A4[A4 读模型<br/>增量 SSE]
-    A3 --> A4
-    A1 --> A5[A5 Agent 行为加固<br/>任务/上下文/记忆/投递]
-    A2 --> A5
-    A1 --> A6[A6 常驻化与运维]
-    A4 --> A7[A7 长期运行]
-    A5 --> A7
-    A6 --> A7
-    B0[B0 浏览器止血<br/>只补漏洞] -.不进关键路径.-> A7
+    WP0[WP0 基线 ✅] --> WP1[WP1 骨架]
+    WP1 --> WP2[WP2 资源抽象]
+    WP1 --> WP3[WP3 状态 v2]
+    WP1 --> WP4[WP4 API v1]
+    WP1 --> WP8[WP8 运维]
+    WP1 --> WP10[WP10 浏览器止血]
+    WP4 --> WP5[WP5 AG-UI 投影]
+    WP3 --> WP6[WP6 读模型 + 增量]
+    WP4 --> WP6
+    WP5 --> WP6
+    WP2 --> WP7[WP7 行为加固]
+    WP3 --> WP7
+    WP6 --> WP9[WP9 长期运行]
+    WP7 --> WP9
+    WP8 --> WP9
 ```
 
-关键路径：**A1 → A2 → A4 → A7**。A3、A5、A6 可并行；B0 是独立小任务。
+四条可并行 lane（文件不重叠）：
 
-## 3. 阶段、工作包与出口判据
-
-### A0 基线（已完成 2026-10-19）
-仓库、`baseline` tag、证据入库、备份脚本 + 恢复演练、CI、凭据入环境变量。
-
-### A1 Server 骨架 + 资源抽象（1.5–2 周，串行前置）
-只搬不改语义，同时把"外部资源"抽象定死。
-
-工作包：
-- 目录 `apps/server/src/{api,domain,runtime,adapters,storage}`；`service.mjs`（781 行）拆成组合根 + `domain/tasks/{work,report,share,followup}` + `domain/{jobs,chats,memory}` + `runtime/{bootstrap,extensions}`。
-- **资源租约接口**（新增，关键）：`adapters/resource.mjs` 定义 `acquire/release/observe/control{epoch,scope}/expire`；浏览器成为第一个实现，Agent domain 不 import Steel/CDP。
-- **副作用通道**：文件、通知、浏览器动作统一走"执行记录 → 结果 → `done/unknown/failed`"，`unknown` 必须可观察核销、禁止自动重放。
-- 配置与凭据收敛（`POINT_*`）、数据目录布局固定、结构化日志骨架。
-
-**出口判据**：
-- 28 项离线套件在新结构全绿；`npm run check` 全绿。
-- `test/unit/*` 不 spawn 服务、不写 `runtime/`。
-- `grep -rn "defineTask" apps/server/src/domain` 为空；`grep -rn "steel\|cdp\|puppeteer" apps/server/src/domain` 为空。
-- 同一个资源接口既能驱动现有浏览器，也能用内存桩验证租约与 unknown 语义。
-
-### A2 状态 v2 + 事件时间线（1.5 周，串行，单一 owner）
-问题：单文档热点、`jobs/requests/actions` 无界、`events` 环形截断 200 导致断线丢事件、`snapshot` 对每 job 调 `storage.task`。
-
-工作包：`point.meta`（schemaVersion/migratedFrom/backupRef）+ 分片 `point.chats/point.chat/point.memory/point.job/point.jobs/point.browser/point.requests`；事件改 `appendEntry` 时间线，游标 = commit seq；迁移在 `harness.resume()` 前用**单个 root commit** 完成；版本高于支持则拒绝启动；升级前自动备份并记 sha256。
-
-**出口判据**：v1 夹具库升级后 `/jobs`、`/chats`、`/memory` 语义等值；连续重启 2 次 `migratedAt` 不变；恢复 pre-v2 备份可启动；`point.requests` 有清扫策略与测试。
-
-### A3 API v1 契约（1–1.5 周，可与 A2 并行）
-`/v1` 前缀；`{error:{code,message,requestId,retryable}}`；所有写操作补幂等键（`cancel/stop/compact/update` 当前缺失）；`/inspect` 门控；`POST /jobs` 重放响应形状统一；SSE `id:` + `Last-Event-ID`。
-
-**出口判据**：契约测试覆盖 400/404/409/413/503；重放响应逐字节相等；SSE 帧单调 id 且可补发。
-
-### A4 读模型 + 增量 SSE（1.5–2 周，依赖 A2+A3）
-用 `subscribeCommits` 的 `{seq, changes}` 投影取代全量快照。
-
-**出口判据**：100 job / 10 chat 夹具下 `/state` 的 `storage.task` 调用 = 0；单 commit 只发 O(变更) 帧；重连回放与首连序列 deepEqual；`/state` p95 < 50ms。
-
-### A5 Agent 行为加固（2–3 周，依赖 A1；部分可与 A2/A4 并行）
-这是"坐稳"的核心：把产品语义从"能跑"变成"可解释、可测试"。
-
-工作包：
-- **任务语义**：Work/Report/Share/Followup 的状态转移表 + 非法转移拒绝；artifact 与 deliver 阶段补 `revision` 复检（现有缺口，`service.mjs:405-415`）；取消/改期/归档的路由规则用表驱动测试。
-- **上下文与记忆**：压缩只作用于活动上下文、原始历史可分页（已有测试，补齐边界：压缩期间强杀、记忆上限、遗忘后历史仍可读）。
-- **投递与通知**：intent-before-effect、回执校验、`unknown` 人工核销路径（目前只有语义，无界面）。
-- **错误分类**：模型错误 / 工具错误 / 外部依赖错误 / 客户端断线分开建模，禁止"模型自信回答把工具失败变成功"（已有用例，扩展到所有 task 类型）。
-- **成本**：每次模型调用记录 tokens/耗时/费用，任务维度汇总，设上限与告警。
-
-**出口判据**：
-- 任务状态转移表 100% 覆盖（含非法转移）；
-- 每类副作用都有 `unknown` 用例；
-- 上下文/记忆/成本三份契约测试在 `test/unit` 与 `test/integration` 都过；
-- 一次任务可从日志/事件重建完整时间线。
-
-### A6 常驻化与运维（1–1.5 周，A1 后可并行）
-Server Dockerfile + compose（`restart: unless-stopped`、healthcheck、资源限制、数据卷、TZ、非 root）；日志落 stdout + 保留策略；定时备份；指标（任务数/失败率/延迟/费用）；凭据 secret。
-
-**出口判据**：容器重启状态与计划无损；备份恢复演练通过；`down && up` 后 `/v1/health` 与历史可读；一次任务全链路可追溯。
-
-### A7 长期运行（2–4 周，依赖 A4+A5+A6）
-7 天挂机（内存/句柄/SSE 连接/任务积压）、供应商故障退避、周期计划（最小版）、记忆规模、成本曲线。
-
-**出口判据**：7 天不重启无泄漏、无丢失计划、无陈旧通知；人为注入模型超时/限流/网络错误仍可恢复；每新增状态变更都有强杀用例。
-
-## 4. 并行 / 串行矩阵（Agent 侧）
-
-| 工作 | 依赖 | 可并行于 | 说明 |
+| Lane | 工作包 | 拥有的文件 | 约束 |
 |---|---|---|---|
-| A1 骨架 + 资源抽象 | A0 | — | 前置；先冻结 ports/接口 1 天再分派 |
-| A2 状态 v2 | A1 | A3、A6 | 事务组单一 owner，**不可与其他改事务组的工作并行** |
-| A3 API v1 | A1 | A2、A5（部分）、A6 | 只动 api 层 |
-| A4 读模型/SSE | A2、A3 | A5、A6 | 与 A2 都碰事务组，必须排在 A2 之后 |
-| A5 行为加固 | A1（+A2） | A3、A4、A6 | 先做任务语义与副作用，上下文/成本可后置 |
-| A6 运维 | A1 | A2、A3、A4、A5 | 数据目录布局一冻结就能容器化 |
-| A7 长跑 | A4、A5、A6 | — | 必须在日志/指标/备份之后 |
+| **A 状态与读模型** | WP3 → WP6 | `storage/**`、`api/**` 的事件投影部分 | **schema/事务组唯一 owner**，其他 lane 不得改 |
+| **B 接口与协议** | WP4 → WP5 | `api/http/**`、`api/agui/**` | 只读 A 的存储接口，不改 schema |
+| **C 领域行为** | WP2 → WP7 | `domain/**`、`adapters/**` | 依赖 B 的契约草案，不改 api |
+| **D 运维与止血** | WP8、WP10 | `Dockerfile`、`deploy/**`、`infra/**` | 不改应用逻辑 |
 
-**五条硬串行规则**：
-1. 状态 schema 变更串行、单一 owner（A2→A4）。
-2. 数据目录布局冻结在容器化之前。
-3. 副作用三态与资源租约接口冻结在所有 adapter 之前（浏览器、文件、通知、未来的 RTC）。
-4. 备份/恢复演练早于真实数据与长跑。
-5. 日志/指标早于长跑。
+**闸门**：
 
-## 5. 模块级并行（A1 内部）
+- **G1 骨架就绪**：WP1 + WP2。`domain` 与具体实现解耦，资源接口可用桩验证。
+- **G2 契约就绪**：WP4 + WP5。REST 与 AG-UI 的契约测试通过，CLI 已切到新协议。
+- **G3 状态就绪**：WP3 + WP6。迁移可回滚，增量事件与重连同步通过。
+- **G4 行为与运营就绪**：WP7 + WP8。状态转移表、`unknown` 用例、容器重启、备份恢复全部通过。
+- **G5 稳定**：WP9。7 天挂机与故障注入通过，方可称为"底层"。
 
-先冻结接口 1 天，然后 4 路并行、文件不重叠：
+## 4. 串行规则（违反就会返工）
 
-| 并行路 | 拥有文件 | 冲突点 |
-|---|---|---|
-| A 领域 | `domain/{jobs,chats,memory}`、`domain/tasks/*` | 事务闭包签名 |
-| B 运行时 | `runtime/{bootstrap,extensions}` | Harness 配置项 |
-| C 适配器 | `adapters/{resource,browser,delivery}` | 与领域共享记录结构 |
-| D 接口 | `api/*`、`storage/*` | 错误码、幂等键命名 |
+1. **状态 schema 与事务组**：WP3 与 WP6 必须同一 owner 顺序推进；其他 lane 在 G3 前不得改 schema。
+2. **接口冻结点**：WP1 的 ports → 各 lane 才能并行；WP2 的资源接口 → adapter 才能写；WP4 的 API 形状 → WP5 才能写；WP5 的事件形状 → Web 才能接。
+3. **一个 WP = 一个分支/PR**：迁移提交必须独立，不夹带功能改动。
+4. **契约变更需 owner 批准**：改测试断言等于改契约，必须由对应 lane owner 确认。
+5. **副作用三态与资源租约先于所有 adapter**：否则每加一个外部能力都要改 domain。
+6. **备份/恢复演练早于真实数据**；**日志/指标早于长跑**。
+7. **浏览器在 P1 补丁前不开放入口**；浏览器集成（原 M3）不在本路线内，等 G5 后重新评估。
 
-单人做按 A1→A2→A3→A4→A5→A6→A7；**2–3 路并行最优**（主线 + 契约 + 运维/行为），4 路以上会在状态 schema 与 API 契约上互踩。
+## 5. 人类与 Agent 的协作协议
 
-## 6. 浏览器现在的处置（B0，约 2–3 天）
+### 5.1 角色
 
-不做集成、不改 viewer、不接原生 RTC，只做止血：
+| 角色 | 负责 |
+|---|---|
+| **人类** | 定基调、过闸门、做取舍（如 A/B/C 决策）、真实验收（真实模型/真实浏览器/体感）、掌管凭据与发布 |
+| **Agent** | 实现 WP、写测试、更新文档、跑判据、报告证据；不自行改契约、不自行扩范围 |
+| **Lead（可为人或 agent）** | 拆分 WP、并行分派、审查 diff、合并、跑全局回归 |
 
-1. **Steel P1 补丁**：所有 WS 写（JSON/ping）串行化，修掉已实测的容器崩溃（未鉴权并发连接 → `panic: concurrent write to websocket connection`，`cmd/main.go:124`）。修复前不对外开放 3001。
-2. **收敛暴露面**：3000/3001/9323 只绑 loopback；不发布 debug 播放器 URL；容器按需启动。
-3. **compose 兜底**：`restart: unless-stopped` + 资源限制（当前只有 mem/cpu，无 restart）。
-4. **文档标注**：把"原生 RTC 未接控制面 + 已知崩溃"写进 [browser-infrastructure](browser-infrastructure.md) 与本文件。
-5. **代码冻结**：`src/browser.mjs`、`src/rtc-viewer.*`、`webrtc/` 只修 bug、不加功能；测试必须保持绿。
+### 5.2 每个 WP 的交接格式
 
-浏览器正式集成（原 M3）推迟到 A7 之后重新评估，保留原决策门 A/B/C（见[历史路线](../../docs/design/roadmap.md) 的 git 记录）。
+开始前（Ready）必须写清：范围（文件）、依赖、验收命令、动的契约、文档更新点、回滚方式。
+完成后（Done）必须满足：
 
-## 7. 风险与决策点（Agent 优先后）
+1. 验收命令通过，输出附在 PR/提交说明里；
+2. 新增/修改的测试可独立运行；
+3. 相关文档同步（`docs/design/**`、`verification-status`）；
+4. 没有跨 lane 的文件改动；
+5. 明确写出"未验证项"。
+
+### 5.3 并行分派规则
+
+- 一个 agent 一次只持有一个 WP；同一 lane 不并行。
+- 分派时给出：WP 编号、允许写的前缀、禁止写的目录、验收命令。
+- 冲突检测靠写前缀互斥；一旦要动别人 lane 的文件，先升级为串行或换 owner。
+- 合并顺序按依赖图，不按完成时间。
+- 每个闸门由 Lead 跑一次全局回归 + 人工抽查，再宣布通过。
+
+### 5.4 决策与记录
+
+- 架构取舍写成 ADR（`docs/design/adr/`），不留在聊天里。
+- 未定问题开 issue，不阻塞 lane 的其它部分。
+- 证据数字只写进 [verification-status](verification-status.md)，其它地方引用它。
+
+## 6. 风险与决策点
 
 | 风险 | 证据 | 处理 |
 |---|---|---|
-| 状态重构期间语义漂移 | 单文档 + 隐式 `??=` | A2 用"v1 夹具库语义等值"作为硬判据；迁移与读写分离 |
-| 长跑状态膨胀/SSE 成本 | 单文档、无清理、O(jobs) | A2 + A4；A7 先压测再优化 |
-| 判断层（L2）无证据 | [decision-layer](decision-layer.md) 明示未验证 | A5 只做**可审计的最小规则**（何时询问/何时通知），不做黑盒评分 |
-| pi-durable 实验性 API | 1.3.0 锁定、无兼容承诺 | 升级前跑固定回归子集 + 状态迁移演练；每季度评估 |
-| 成本不可见 | 无 token/费用记录 | A5 记录、A6 指标、A7 预算告警 |
-| 单人串行导致周期长 | 关键路径 7–9 周 | 用 2–3 路并行压缩；A3/A6/A5 都可脱钩 |
+| 状态重构期间语义漂移 | 单文档 + 隐式 `??=` | WP3 以"v1 夹具库语义等值"为硬判据 |
+| 长跑状态膨胀 / 事件成本 | 单文档、无清理、O(jobs) | WP3 + WP6；WP9 先压测 |
+| AG-UI 规范演进 | 1.0 已有 31 事件且仍在加 | 锁 `protocolVersion`，vendored schema 契约测试，未知事件容忍 |
+| 判断层无证据 | [decision-layer](decision-layer.md) 自述未验证 | WP9 只做可审计的最小规则，不做黑盒评分 |
+| pi-durable 实验性 API | 1.3.0 锁定、无兼容承诺 | 升级前跑固定回归 + 迁移演练；每季度评估 |
+| 成本不可见 | 无 token/费用记录 | WP5 `usage` + WP7 记录 + WP8 指标 |
+| Steel 崩溃/暴露面 | 已实测未鉴权并发打挂容器 | WP10 止血；正式集成另行评估 |
 
-## 8. 时间估算（推断，单人全周 / 2 人并行）
+## 7. 反模式
 
-| 阶段 | 单人 | 2 人 |
-|---|---|---|
-| A1 骨架 + 资源抽象 | 1.5–2 周 | 1–1.5 周 |
-| A2 状态 v2 | 1.5 周 | 1 周 |
-| A3 API v1 | 1–1.5 周 | 1 周（并行） |
-| A4 读模型/SSE | 1.5–2 周 | 1.5 周 |
-| A5 行为加固 | 2–3 周 | 2 周 |
-| A6 运维 | 1–1.5 周 | 1 周（并行） |
-| A7 长跑 | 2–4 周 | 2–3 周 |
-| B0 浏览器止血 | 2–3 天 | 2 天 |
-
-关键路径（A1→A2→A4→A5→A7）约 **8–11 周**；若 A5 与 A2/A4 并行得好，可压到 7–9 周。
-
-## 9. 未来两周
-
-1. **Day 1**：写定 [Agent 层架构基调](agent-core.md) 的 10 条不变量；冻结 `apps/server` 的 ports、资源租约接口、事件帧格式。
-2. **Day 1–2**：B0 浏览器止血（P1 补丁 + 暴露面 + restart），只此一次，之后冻结。
-3. **Day 2–7**：A1 骨架；四路并行按 §5 分派；结束时 28 项测试在新结构全绿。
-4. **Day 5 起**：A6 容器化骨架并行（数据目录布局冻结后）。
-5. **Week 2**：A2 状态 v2 与 A3 API v1 并行；A2 出口判据必须全部满足再动 A4。
-
-## 10. 反模式
-
-1. 在 A1 期间顺手加功能——只搬不改，否则测试基线失效。
-2. 浏览器推迟但资源抽象仍写成"浏览器专用"——以后接 RTC 要改 domain。
+1. 在 WP1 期间顺手加功能——只搬不改，否则测试基线失效。
+2. 浏览器推迟但资源抽象写成"浏览器专用"。
 3. 先做 UI 再定契约。
-4. 迁移与读写混在一个提交里。
+4. 迁移与功能混在一个 PR。
 5. 跳过备份/恢复就跑长任务。
 6. 引入第二执行引擎。
-7. 把"能跑通"当"稳定"——每阶段必须有可运行的出口判据。
+7. 用"第几周"衡量进度——只看闸门。
+8. agent 自行扩大范围或修改契约测试。
