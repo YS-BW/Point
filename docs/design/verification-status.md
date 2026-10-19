@@ -214,6 +214,8 @@
 
 **G2（契约就绪）= WP4 + WP5：判定通过。** REST 契约（WP4 15/15）与 AG-UI 契约（13/13）测试通过，参考 CLI（`apps/server/src/cli.ts`）消费新协议。**口径说明**：此前没有产品 CLI 可"切换"，原型 CLI 明确未替换；若"CLI 已切到新协议"要求替换某个既有产品 CLI，此项仍是后续动作。
 
+> **本节已被下方「WP5 纠偏收口」修订**：当时所称的“参考 CLI 消费新协议”已按用户决定取消（Web-first），`RUN_FINISHED` 不再发送标准 `usage`。旧数字与结论作为历史记录保留。
+
 **usage 口径**：`RUN_FINISHED.usage` 是会话 `UsageState` 账本差分（按 model/tool bucket 聚合），**派生值**，不是 provider 精确账单（无 cost、不拆单次调用，retry/compaction 归属可能与账单不同）。
 
 **未验证项**：真实 provider 逐 token 流/网络断线重连/限流（仅 faux）；真实工具执行到 `TOOL_CALL_*` 端到端（前台 chat run 不注册 tool extension，工具顺序由 projection 与脚本化 port 覆盖）；usage 与 provider 账单对账；多客户端/follow-up run 隔离；SSE 反向代理缓冲/背压/半开/EPIPE（`response` 未装 `error` 监听）；重复 end 事件可能双发 END；`point.ui` 方括号 DOM 形式未覆盖且当前无发射路径；`Last-Event-ID`/快照/`ACTIVITY`/运行流（WP6）与 interrupt/resume（WP7）不在本片；高频并发与长跑未测。
@@ -233,3 +235,25 @@
 **边界与未验证项**：结束快照目前仅为既有可见文本历史，Point 消费者必须使用官方快照回调显式替换视图，默认 HttpAgent 合并不能自动清掉本地草稿。缓冲溢出/SDK resnapshot 显式中断观察，不提供 WP6 接续；活动请求重试不保证补齐已丢 token。未验证真实 provider/工具全链路、完整工具历史、代理/半开/慢消费压测、正式 Docker/长跑与本轮独立评审。没有引入第二引擎、第二事实库或持久 schema。
 
 证据：[WP5 SDK 纠偏完整输出](../../infra/pi-durable-validation/evidence/wp5-sdk-correction-2026-10-19T07-50-28Z.json)（含最终源码哈希与前次失败输出）。
+
+## WP5 纠偏收口：官方 AG-UI SDK + CLI 移除（2026-10-19）
+
+**勘误并取代上文两段**：此前 WP5 的自写 wire types、字符串 `outcome` 与汇总 `usage` 不能作为官方 AG-UI 1.0 兼容证据；参考 CLI 已按用户决定删除（产品改为 **Web-first**）。旧证据与旧段落保留，不覆盖。
+
+**当前契约（实现口径）**：边缘使用官方 `@ag-ui/core`+`@ag-ui/encoder@1.0.3` 逐帧 `EventSchema` 校验后编码，`zod@3.25.76` 显式 pin；`@ag-ui/client@1.0.3` 仅在 devDependencies，由契约测试作为官方消费者。`RUN_FINISHED.outcome` 为对象 `{type: success|cancelled}`，**标准 `usage` 不发送**（会话账本差分无法归属单次运行）；run 结束前发送**有界** `MESSAGES_SNAPSHOT`（10,000 条 / 8 MiB / 1,000 页，超限抛 `OBSERVATION_RESYNC_REQUIRED` 且不发不完整快照）；观察中断以 `OBSERVATION_TIMEOUT`/`OBSERVATION_RESYNC_REQUIRED` 表达，**只停观察、不代表执行失败、不取消不重放**；临时草稿 id 跨 run 唯一（`draft-<streamId>-N`），多消息 history entry 使用 `entryId:index`。
+
+**同时修复的真实缺陷**：超大 body 的 413 路径提前销毁 socket（客户端看到连接重置而不是 413 信封）；重复 END 帧；观察 loop 的 timer/abort 监听泄漏；缺少响应 `error` 监听。
+
+| 证据项 | 数值 / 结果 | 证据 |
+|---|---|---|
+| 根目录全量 | `npm run check`、`npm test` 通过：**325 项通过，0 fail / 0 skip** | 本段命令输出 |
+| AG-UI 定向 | `agui` **22/22**（含官方 HttpAgent 契约测试、快照超限 `OBSERVATION_RESYNC_REQUIRED` 不残缺、观察中断不取消执行） | `apps/server/test/agui.test.ts` |
+| 边界检查 | `scripts/*.test.mjs` **10/10**（CLI lane 已删除，其余规则未动） | `scripts/boundaries.test.mjs` |
+| 原型回归 | `npm run check`（28 modules）+ `POINT_CRASH_ROUNDS=1 npm test` **28/28** | 本段命令输出 |
+| 独立动态验证 | **8/8**：真实 server + 官方 `@ag-ui/client` `HttpAgent`（outcome 对象、无 usage、LIFO 取消、截断、id 唯一、快照对账、413 两种形态） | task-61 报告 |
+| 独立代码审计 | **PASS（无 blocker）**：分层/边界只放行 api lane 的 `@ag-ui/*`、旧保证未回归、413 非测试放宽、依赖为协议库而非 Agent 运行时 | [WP5 纠偏审计](../team/reviews/wp5-agui-sdk-correction.md) |
+| OpenSpec strict | `agent-agui-projection` valid（已清理 CLI/usage 陈旧表述） | `openspec validate --strict` |
+
+**G2 判据更新（2026-10-19 用户决定）**：G2 由“REST/AG-UI 契约测试通过 + CLI 切到新协议”改为“REST 与 AG-UI 契约测试通过，并由官方 `@ag-ui/client` 在契约测试中消费”；**不再提供产品 CLI 或参考 CLI**，首个真实客户端是 WP13 的 Web 客户端。
+
+**未验证项（不得外推）**：真实 provider 逐 token/网络断线重连/限流与背压（仅 faux）；真实 120s 空闲触发 `OBSERVATION_TIMEOUT`（映射与“不取消执行”已由既有重试测试与超限回归覆盖）；快照上限只验证 10,001 条一条路径，8 MiB/1,000 页边界未逐一触发；前台 chat run 仍无工具事件（工具历史属 WP6）；`/v1/agent` 同幂等键重放语义与流式访问日志脱敏未单独复测；Web 客户端（WP13）尚未存在。

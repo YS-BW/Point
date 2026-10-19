@@ -59,3 +59,10 @@
 - **G2（契约就绪）宣布通过**：REST（WP4 15/15）+ AG-UI（13/13）契约测试通过，参考 CLI 消费新协议。口径注意：此前无产品 CLI 可切换，原型 CLI 未替换。
 - 下一个闸门 G3 = WP3 + WP6（读模型 + 增量事件/线程流/`Last-Event-ID`/运行流），WP6 已解锁。
 - 证据：[wp5-agui-g2](../../infra/pi-durable-validation/evidence/wp5-agui-g2-2026-10-19T07-22-51Z.json)。
+
+## WP5 官方 SDK 纠偏与 CLI 移除（2026-10-19）
+
+- Codex 提交的官方 SDK 纠偏经 Lead 复核后收拢到 `fix/wp5-agui-sdk-compliance`（`fef0c34` 纠偏 + `bc17c6f` 移除 CLI），并通过独立验证（官方 `@ag-ui/client` HttpAgent，8/8）与独立审计（PASS，无 blocker）。
+- 用户决定：**接受官方依赖**（`@ag-ui/core|encoder@1.0.3` + `zod@3.25.76`，`@ag-ui/client` 转 devDependency 供契约测试）；**删除参考 CLI，产品改 Web-first**。G2 判据相应改为“REST 与 AG-UI 契约测试通过 + 官方 client 在契约测试中消费”，首个真实客户端是 WP13。
+- 契约修正：`RUN_FINISHED.outcome={type}`、标准 `usage` 不再发送（无法归属单次运行）、run 末有界 `MESSAGES_SNAPSHOT`、`OBSERVATION_*` 只停观察不代表失败；修复 413 socket 重置、重复 END、监听泄漏。
+- 数字：`npm run check` pass；`npm test` **325/325**；agui **22/22**；原型 **28/28**；openspec strict 通过。证据：[WP5 SDK 纠偏](../../infra/pi-durable-validation/evidence/wp5-sdk-correction-2026-10-19T07-50-28Z.json)。

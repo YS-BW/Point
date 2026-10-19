@@ -41,7 +41,7 @@ WP1b 以产品行为契约和失败语义为出口，原型只提供案例与可
 | **WP2** | 资源抽象：`resource{owner,lease,controlEpoch,state}` 接口 + `adapters/resource`；文件/通知/浏览器统一"意图→执行→三态"；domain 不 import 具体实现 | WP1 | 同一接口能用内存桩跑通租约、过期、`unknown`；`grep` 证明 domain 无 steel/cdp | `apps/server/src/adapters/**`、`domain/**` |
 | **WP3** | 状态 v2 + 迁移：`point.meta/chats/chat/memory/job/jobs/browser/requests` 分片；事件改时间线；单 commit 迁移；升级前自动备份；版本闸门 | WP1（与 WP4 可并行，但**事务组唯一 owner**） | v1 夹具库升级语义等值；重启两次迁移幂等；恢复 pre-v2 快照可启动；请求账本有清扫 | `apps/server/src/storage/**`、`runtime/**` |
 | **WP4** | API v1 基础契约：`/v1`、错误码对象、所有写操作幂等键、`/inspect` 门控、鉴权、访问日志 | WP1 | 契约测试覆盖 400/404/409/413/503；重放响应逐字节相等 | `apps/server/src/api/**` |
-| **WP5** | AG-UI 投影：`POST /v1/agent`、run 生命周期、文本/工具/step 事件、`RUN_FINISHED.usage`、cancelled 语义 | WP4 | 契约测试：流以 `RUN_STARTED` 开头；未知事件被容忍；截断流不伪造 FINISHED；CLI 作为第一个消费者 | `apps/server/src/api/agui/**` |
+| **WP5** | AG-UI 投影：`POST /v1/agent`、run 生命周期、文本/工具/step 事件、官方 schema 校验与编码、有界 `MESSAGES_SNAPSHOT`、cancelled 语义（标准 `usage` 因无法归属单次运行而省略） | WP4 | 契约测试：流以 `RUN_STARTED` 开头；未知事件被容忍；截断流不伪造 FINISHED；官方 `@ag-ui/client` 在契约测试中消费该流 | `apps/server/src/api/agui/**` |
 | **WP6** | 读模型 + 增量事件：`subscribeCommits` 投影；`STATE_SNAPSHOT/DELTA`、`MESSAGES_SNAPSHOT`、`ACTIVITY`、`CUSTOM`；线程流（自定义绑定 + `Last-Event-ID` + 同步 run）；运行流 | WP3、WP4、WP5 | 100 job/10 chat 夹具下 `/state` 的 `storage.task` 调用=0；单 commit 只发 O(变更) 帧；离线重连后状态/消息一致 | `apps/server/src/api/**`、`storage/**` |
 | **WP7** | Agent 行为加固：任务状态转移表（含非法转移）、artifact/deliver 的 revision 复检、上下文/压缩边界、记忆上限与遗忘、投递 `unknown` 核销、成本记录 | WP1、WP2（部分依赖 WP3） | 状态转移表 100% 覆盖；每类副作用都有 `unknown` 用例；一次任务可从事件重建 | `apps/server/src/domain/**`、`adapters/**` |
 | **WP8** | 常驻化与运维：Dockerfile + compose（restart/healthcheck/资源限制/卷/TZ/非 root）、日志保留、定时备份、指标（任务数/失败率/延迟/费用） | WP1 | 容器重启状态与计划无损；恢复演练通过；一次任务全链路可追溯 | `apps/server/Dockerfile`、`deploy/**`、`infra/**` |
@@ -81,7 +81,7 @@ flowchart LR
 **闸门**：
 
 - **G1 骨架就绪**：WP1a + WP1b + WP2。`domain` 与具体实现解耦，资源接口可用桩验证。
-- **G2 契约就绪**：WP4 + WP5。REST 与 AG-UI 的契约测试通过，CLI 已切到新协议。
+- **G2 契约就绪**：WP4 + WP5。REST 与 AG-UI 的契约测试通过，并由官方 `@ag-ui/client` 在契约测试中消费。**2026-10-19 用户决定改为 Web-first**：不提供产品 CLI/参考 CLI（原“CLI 已切到新协议”判据作废），首个真实客户端是 WP13 的 Web 客户端。
 - **G3 状态就绪**：WP3 + WP6。迁移可回滚，增量事件与重连同步通过。
 - **G4 行为与运营就绪**：WP7 + WP8。状态转移表、`unknown` 用例、容器重启、备份恢复全部通过。
 - **G5 运行基线通过**：WP9。完成约定长跑与故障注入，得到该环境下的运行证据；不等于完整产品、任意任务或永久可靠。
@@ -163,7 +163,7 @@ flowchart LR
 |---|---|---|---|
 | WP11 承诺闭环 | 对话发现明确承诺、纠正/完成、时间解释、提前准备草稿、最多规定次数跟进 | G3、WP7、WP9 | 模糊意愿不建任务，无日期不催促，错过提醒合并，修订不发旧提醒；domain/application/runtime，语义评测与 Durable 故障测试 |
 | WP12 长期目标 | 目标→计划→有界工作→结果核验→下一步；暂停/恢复与计划修订 | WP11、预算/决策审计 | 用户目标不被 task settled 自动完成；等待用户持久化；无进展/预算耗尽停止；跨重启/多次 attempt 仍可解释 |
-| WP13 首个 Web 客户端 | 主会话、侧聊、工作与产物，离线后可重建 | G2、G3、WP7 | 先 CLI 契约消费，再 apps/web；真实断线重连、停止/取消作用域、错误可见；不搬服务端事实到浏览器 |
+| WP13 首个 Web 客户端 | 主会话、侧聊、工作与产物，离线后可重建 | G2、G3、WP7 | 直接用官方 AG-UI 客户端对接 `POST /v1/agent`；真实断线重连、停止/取消作用域、错误可见、权威消息快照替换；不搬服务端事实到浏览器 |
 | WP14 浏览器正式集成 | Steel 工作环境与人工接管 | G4、WP10、WP2、WP13 | 单一资源控制入口；旧 epoch 拒绝；unknown 核销；重启资源对账；发布镜像实测；此前保持冻结 |
 | WP15 个性化与上下文质量 | 显式 Profile/USER.md 导入导出、来源、遗忘、上下文预算与纠错 | G3、WP7 | 没有第二权威；保存/导入/删除幂等；压缩不删历史；相关性/误记回归。自动记忆需新 ADR |
 | WP16 单向通知 | 至少一个可用渠道，结果在会话完整保留 | WP11、WP7、WP8 | decision 与 delivery 分离；陈旧消息丢弃；回执丢失 unknown；通知失败不丢对话结果 |
