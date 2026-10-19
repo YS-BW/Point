@@ -16,6 +16,8 @@ import { contextExtension } from './context.js';
 import { guardedModels } from './model-guard.js';
 import { durableProfileStore } from './profile.js';
 import { conversationRuntime } from './conversation.js';
+import { agentRuntime } from './agui.js';
+import type { AgentRunPort } from '../application/agent-stream.js';
 import type { ConversationCommands } from '../application/conversation.js';
 import type { JobCommands } from '../application/job.js';
 import { artifactCommandsForHarness, sha256Hex } from './artifacts.js';
@@ -67,6 +69,8 @@ export type Runtime = RuntimeHandle & {
   readonly followups: FollowupCommands;
   readonly deliveries: DeliveryCommands;
   readonly resources: ResourceCommands;
+  /** WP5: provider-neutral foreground run stream consumed by the AG-UI edge. */
+  readonly agent: AgentRunPort;
   /** True when the runtime was opened with `mode: 'read-only'`. */
   readonly readOnly: boolean;
   /** Explicit bounded request-ledger cleanup; never removes active/attempting/unknown references. */
@@ -199,6 +203,7 @@ export async function openRuntime(
       followups: schedules.commands,
       deliveries: deliveries.commands,
       resources,
+      agent: agentRuntime(conversation.commands, current),
       readOnly: mode === 'read-only',
       cleanupReceipts: options => mode === 'read-only'
         ? Promise.reject(new StateFormatError('READ_ONLY'))

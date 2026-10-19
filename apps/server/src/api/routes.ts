@@ -12,11 +12,16 @@ import type { JobCommands } from '../application/job.js';
 import type { ProfileCommands } from '../application/profile.js';
 import type { FollowupCommands } from '../application/schedule.js';
 import type { HealthReader } from '../application/ports.js';
+import type { AgentRunPort } from '../application/agent-stream.js';
 import { ApiError } from './errors.js';
+import { idempotencyKey } from './idempotency.js';
 import { readJsonObject, type BodyCounter } from './json.js';
+import { agentRoute } from './agui/route.js';
 
 export type ApiRuntime = Readonly<{
   instanceId: string;
+  /** WP5 AG-UI projection port; absent means `POST /v1/agent` is RUNTIME_NOT_READY. */
+  agent?: AgentRunPort;
   chats: ChatCommands;
   conversation: ConversationCommands;
   profile: ProfileCommands;
@@ -34,33 +39,28 @@ export type RouteContext = Readonly<{
   requestId: string;
   bodyLimitBytes: number;
   counter: BodyCounter;
+  /** Access-log entry record for a streaming response (the exit record is logged by the transport). */
+  logStreamOpen(): void;
 }>;
 
-export type Route = Readonly<{
+export type RestRoute = Readonly<{
   method: 'GET' | 'POST';
   /** Path segments, e.g. `['v1','chats',':chatId']`. */
   segments: readonly string[];
   handle(context: RouteContext): Promise<unknown>;
 }>;
 
+/** Streaming routes own the response (headers, SSE frames, client-disconnect handling). */
+export type StreamRoute = Readonly<{
+  method: 'POST';
+  segments: readonly string[];
+  stream: true;
+  handle(context: RouteContext, response: import('node:http').ServerResponse): Promise<void>;
+}>;
+
+export type Route = RestRoute | StreamRoute;
+
 /** Frozen contract: 8..128 characters, matching the documented minimum. */
-const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
-
-function header(request: IncomingMessage, name: string): string | undefined {
-  const value = request.headers[name];
-  return typeof value === 'string' ? value : undefined;
-}
-
-/** Every write maps Idempotency-Key to the command requestId; the body may not override it. */
-export function idempotencyKey(request: IncomingMessage): string {
-  const key = header(request, 'idempotency-key');
-  if (key === undefined) throw new ApiError(400, 'INVALID_COMMAND', 'Idempotency-Key is required');
-  if (!IDEMPOTENCY_PATTERN.test(key)) {
-    throw new ApiError(400, 'INVALID_COMMAND', 'Idempotency-Key must be 8..128 characters');
-  }
-  return key;
-}
-
 function writeInput(
   body: Record<string, unknown>,
   request: IncomingMessage,
@@ -96,7 +96,7 @@ function notFound(code: string): never {
 }
 
 export function v1Routes(): readonly Route[] {
-  return [
+  const routes: RestRoute[] = [
     // Chats and conversation.
     {
       method: 'POST', segments: ['v1', 'chats'],
@@ -259,4 +259,5 @@ export function v1Routes(): readonly Route[] {
       },
     },
   ];
+  return [...routes, agentRoute()];
 }

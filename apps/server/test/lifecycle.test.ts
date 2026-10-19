@@ -73,7 +73,9 @@ test('health is truthful and unsupported routes and methods are rejected', async
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {phase: 'ready', capabilities: ['foundation']});
   }
-  assert.equal((await fetch(base + '/v1/agent')).status, 404);
+  // WP5 added POST /v1/agent: an unknown path is still 404 and a wrong method is 405.
+  assert.equal((await fetch(base + '/v1/unknown')).status, 404);
+  assert.equal((await fetch(base + '/v1/agent')).status, 405);
   assert.equal((await fetch(base + '/health/live', {method: 'POST'})).status, 405);
 });
 test('failed HTTP bind releases storage ownership', async t => {

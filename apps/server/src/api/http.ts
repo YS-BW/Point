@@ -154,10 +154,27 @@ export function createHttp(options: HttpOptions): Server {
       throw new ApiError(401, 'UNAUTHORIZED', messageFor('UNAUTHORIZED'));
     }
     if (options.commands === undefined) throw new ApiError(503, 'RUNTIME_NOT_READY', messageFor('RUNTIME_NOT_READY'));
-    const result = await resolved.route.handle({
+    const context = {
       request, url, params: resolved.params, commands: options.commands,
       health: options.health, requestId, bodyLimitBytes, counter,
-    });
+      logStreamOpen: () => {
+        log(JSON.stringify({
+          at: new Date().toISOString(),
+          event: 'http.stream_open',
+          requestId,
+          method,
+          path: pathname,
+          status: 200,
+          durationMs: 0,
+          bytesIn: counter.bytes,
+        }));
+      },
+    };
+    if ('stream' in resolved.route) {
+      await resolved.route.handle(context, response);
+      return response.statusCode;
+    }
+    const result = await resolved.route.handle(context);
     await respond(response, 200, result);
     return 200;
   }

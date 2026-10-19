@@ -16,7 +16,7 @@ const allowed = {
 export function violations(path, source) {
   const lane = relative(root, path).split(sep)[0];
   const errors = [];
-  if (!allowed[lane] && !['main.ts', 'bootstrap.ts', 'config.ts'].includes(lane)) errors.push(`unregistered architectural layer ${lane}`);
+  if (!allowed[lane] && !['main.ts', 'bootstrap.ts', 'config.ts', 'cli.ts'].includes(lane)) errors.push(`unregistered architectural layer ${lane}`);
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   function check(spec) {
     if (typeof spec !== 'string') { errors.push('nonliteral module loading'); return; }
