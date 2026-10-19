@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createModels } from '@earendil-works/pi-ai/models';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { createRegistry, defineDocFamily, Harness } from '@earendil-works/pi-durable';
@@ -14,7 +15,8 @@ import {
   type Resource, type ResourceOperation,
 } from '../src/domain/resource.js';
 import {
-  resourceCommands, type ResourceCommands, type ResourceEffectPort, type ResourceMutation,
+  createEffectRegistry, resourceCommands,
+  type EffectDefinition, type EffectRegistry, type ResourceCommands, type ResourceEffectPort, type ResourceMutation,
 } from '../src/application/resource.js';
 import { durableResourceStore } from '../src/runtime/resources.js';
 import { openRuntime, type Runtime } from '../src/runtime/open.js';
@@ -58,14 +60,49 @@ const command = (overrides: Readonly<Record<string, unknown>> = {}) => ({
   resourceId: RESOURCE_ID, requestId: 'req-1', owner: OWNER, ttlMs: 120_000, ...overrides,
 });
 
-const operationInput = (overrides: Readonly<Record<string, unknown>> = {}) => ({
-  operationId: 'op-1', requestId: 'req-1', resourceId: RESOURCE_ID, controlEpoch: 1, ...overrides,
+/** One registered test capability used by every secure dispatch in this suite. */
+const EFFECT_KIND = 'test.effect';
+const TEST_EVIDENCE = {kind: 'test', sha256: 'a'.repeat(64)};
+
+const effectDefinition: EffectDefinition = {
+  kind: EFFECT_KIND,
+  maxPayloadBytes: 1024,
+  maxResultBytes: 1024,
+  maxEvidenceBytes: 512,
+  validatePayload(payload) {
+    if (typeof payload.value !== 'string' || payload.value.length === 0) throw new ResourceError('INVALID_COMMAND');
+  },
+  validateResult(result) {
+    if (result === null || typeof result !== 'object' || Array.isArray(result)) throw new ResourceError('RESULT_REJECTED');
+  },
+  validateEvidence(evidence) {
+    if (evidence.kind !== 'test' || typeof evidence.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(evidence.sha256)) {
+      throw new ResourceError('INVALID_EVIDENCE');
+    }
+  },
+};
+
+const secureOperationInput = (
+  controlEpoch: number, deadline: number, overrides: Readonly<Record<string, unknown>> = {},
+) => ({
+  operationId: 'op-1', requestId: 'req-1', resourceId: RESOURCE_ID, controlEpoch,
+  effect: {kind: EFFECT_KIND, payload: {value: 'payload-1'}},
+  deadline,
+  ...overrides,
 });
 
-function countingEffect() {
+function registryFor(
+  script: (operation: ResourceOperation, invocation?: {signal: AbortSignal; deadline: number}) => Promise<unknown>,
+) {
   const calls: ResourceOperation[] = [];
-  const port: ResourceEffectPort = {async invoke(op) { calls.push(op); return {ok: true}; }};
-  return {calls, port};
+  const effect: ResourceEffectPort = {
+    async invoke(operation, invocation) {
+      calls.push(operation);
+      return script(operation, invocation);
+    },
+  };
+  const registry: EffectRegistry = createEffectRegistry([{definition: effectDefinition, effect}]);
+  return {calls, registry};
 }
 
 async function assertNoDocuments(
@@ -310,41 +347,51 @@ test('openRuntime resources persist across close/reopen with receipts and no dou
 
 test('an operation whose effect is unknown is persisted and never replayed after reopen', {timeout: 30000}, async t => {
   const dir = await directory(t);
-  let runtime = await openRuntime(dir);
+  const effect = registryFor(async () => { throw new Error('socket hang up'); });
+  const deadline = Date.now() + 60_000;
+  let operationId: string;
+  let payloadHash: string;
+  let runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
   try {
     const resource = await runtime.resources.acquire(command());
-    const op = await runtime.resources.beginOperation(operationInput({controlEpoch: resource.controlEpoch}));
-    const crashCalls: ResourceOperation[] = [];
-    const crashPort: ResourceEffectPort = {async invoke(called) { crashCalls.push(called); throw new Error('socket hang up'); }};
-    const unknown = await runtime.resources.runOperation(op.id, crashPort);
+    const op = await runtime.resources.beginOperation(secureOperationInput(resource.controlEpoch, deadline));
+    operationId = op.id;
+    assert.ok(op.effect, 'the intent persists the registered effect binding');
+    payloadHash = op.effect.payloadHash;
+    assert.deepEqual([op.owner, op.effect.kind], [OWNER, EFFECT_KIND]);
+    assert.equal(effect.calls.length, 0, 'beginOperation never invokes the effect');
+    const unknown = await runtime.resources.runOperation(op.id, effect.registry);
     assert.equal(unknown.state, 'unknown');
-    assert.equal(crashCalls.length, 1, 'the effect was attempted once before it became unknown');
+    assert.equal(effect.calls.length, 1, 'the effect was attempted once before it became unknown');
   } finally {
     await runtime.close();
   }
 
-  runtime = await openRuntime(dir);
+  runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
   try {
-    const replay = countingEffect();
-    const recovered = await runtime.resources.runOperation('op-1', replay.port);
+    const recovered = await runtime.resources.runOperation(operationId, effect.registry);
     assert.equal(recovered.state, 'unknown', 'the durable unknown state survives reopen');
-    assert.equal(replay.calls.length, 0, 'unknown is never replayed automatically');
-    assert.equal((await runtime.resources.runOperation('op-1', replay.port)).state, 'unknown');
-    const reconciled = await runtime.resources.observeOperation({operationId: 'op-1', status: 'done', result: {ok: true}});
+    assert.equal(effect.calls.length, 1, 'unknown is never replayed automatically');
+    assert.equal((await runtime.resources.runOperation(operationId, effect.registry)).state, 'unknown');
+    const reconciled = await runtime.resources.observeOperation({
+      operationId, status: 'done', result: {ok: true}, evidence: TEST_EVIDENCE,
+      observer: OWNER, payloadHash, controlEpoch: 1,
+    });
     assert.deepEqual([reconciled.state, reconciled.result], ['done', {ok: true}]);
+    assert.deepEqual(reconciled.evidence, TEST_EVIDENCE);
+    assert.equal(reconciled.observer, OWNER);
   } finally {
     await runtime.close();
   }
 
-  runtime = await openRuntime(dir);
+  runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
   try {
-    const replay = countingEffect();
-    assert.equal((await runtime.resources.runOperation('op-1', replay.port)).state, 'done');
-    assert.equal(replay.calls.length, 0, 'a reconciled terminal operation is never dispatched');
-    // The beginOperation request index is durable and still idempotent.
-    const original = await runtime.resources.beginOperation(operationInput());
+    assert.equal((await runtime.resources.runOperation(operationId, effect.registry)).state, 'done');
+    assert.equal(effect.calls.length, 1, 'a reconciled terminal operation is never dispatched');
+    // The secure beginOperation request index is durable and still idempotent (same payload/deadline).
+    const original = await runtime.resources.beginOperation(secureOperationInput(1, deadline));
     assert.deepEqual([original.id, original.state], ['op-1', 'done']);
-    await assert.rejects(runtime.resources.beginOperation(operationInput({operationId: 'op-2'})),
+    await assert.rejects(runtime.resources.beginOperation(secureOperationInput(1, deadline, {operationId: 'op-2'})),
       hasCode('IDEMPOTENCY_CONFLICT'));
   } finally {
     await runtime.close();
@@ -353,21 +400,25 @@ test('an operation whose effect is unknown is persisted and never replayed after
 
 test('an intent operation survives reopen and is only dispatched when explicitly run', {timeout: 30000}, async t => {
   const dir = await directory(t);
-  let runtime = await openRuntime(dir);
+  const effect = registryFor(async () => ({ok: true}));
+  const deadline = Date.now() + 60_000;
   let operationId: string;
+  let runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
   try {
     const resource = await runtime.resources.acquire(command());
-    operationId = (await runtime.resources.beginOperation(operationInput({controlEpoch: resource.controlEpoch}))).id;
+    const op = await runtime.resources.beginOperation(secureOperationInput(resource.controlEpoch, deadline));
+    operationId = op.id;
+    assert.equal(op.state, 'intent');
+    assert.equal(effect.calls.length, 0, 'creating an intent never invokes the effect');
   } finally {
     await runtime.close();
   }
-  runtime = await openRuntime(dir);
+  runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
   try {
-    const effect = countingEffect();
-    const done = await runtime.resources.runOperation(operationId, effect.port);
+    const done = await runtime.resources.runOperation(operationId, effect.registry);
     assert.deepEqual([done.state, done.result], ['done', {ok: true}]);
     assert.equal(effect.calls.length, 1, 'an intent is dispatched exactly once on explicit run');
-    const again = await runtime.resources.runOperation(operationId, effect.port);
+    const again = await runtime.resources.runOperation(operationId, effect.registry);
     assert.equal(again.state, 'done');
     assert.equal(effect.calls.length, 1, 'the terminal operation is never re-dispatched');
   } finally {
@@ -428,13 +479,27 @@ test('a newer stored resource document version is rejected instead of silently r
 });
 
 /* -------------------------------------------------------------------------- */
-/* SIGKILL windows: attempting is never replayed, intent is never auto-run      */
+/* SIGKILL windows: attempting is recovered explicitly, intent is never auto-run */
 /* -------------------------------------------------------------------------- */
 
-type CrashIdentity = {resourceId: string; operationId: string; controlEpoch: number};
-type ChildMessage = {event?: string; operationId?: string; resourceId?: string; controlEpoch?: number; message?: string};
+type CrashIdentity = {
+  resourceId: string;
+  operationId: string;
+  controlEpoch: number;
+  deadline: number;
+  payloadHash: string;
+};
+type ChildMessage = {
+  event?: string;
+  operationId?: string;
+  resourceId?: string;
+  controlEpoch?: number;
+  deadline?: number;
+  payloadHash?: string;
+  message?: string;
+};
 
-async function crashIdentity(dir: string, mode: 'attempting' | 'intent', tolerance: boolean) {
+async function crashIdentity(dir: string, mode: 'attempting' | 'intent') {
   const child = fork(new URL('./fixtures/resource-crash.js', import.meta.url), [dir, mode], {
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
@@ -451,8 +516,12 @@ async function crashIdentity(dir: string, mode: 'attempting' | 'intent', toleran
           clearTimeout(timer);
           reject(new Error(String(event.message)));
         }
-        if (event.event === 'started' && event.resourceId && event.operationId && event.controlEpoch !== undefined) {
-          started = {resourceId: event.resourceId, operationId: event.operationId, controlEpoch: event.controlEpoch};
+        if (event.event === 'started' && event.resourceId && event.operationId
+          && event.controlEpoch !== undefined && event.deadline !== undefined && event.payloadHash) {
+          started = {
+            resourceId: event.resourceId, operationId: event.operationId, controlEpoch: event.controlEpoch,
+            deadline: event.deadline, payloadHash: event.payloadHash,
+          };
           if (mode === 'intent') {
             clearTimeout(timer);
             resolve(started);
@@ -463,9 +532,7 @@ async function crashIdentity(dir: string, mode: 'attempting' | 'intent', toleran
           resolve(started);
         }
       });
-      child.once('exit', () => {
-        if (!tolerance) reject(new Error(`resource fixture exited early: ${stderr}`));
-      });
+      child.once('exit', () => reject(new Error(`resource fixture exited early: ${stderr}`)));
     });
     child.kill('SIGKILL');
     await exited;
@@ -476,28 +543,35 @@ async function crashIdentity(dir: string, mode: 'attempting' | 'intent', toleran
   }
 }
 
-test('SIGKILL after the effect started: restart marks unknown and never replays', {timeout: 60000}, async () => {
+test('SIGKILL after the effect started: restart recovers unknown and never replays', {timeout: 60000}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'point-resource-crash-'));
   try {
-    const identity = await crashIdentity(dir, 'attempting', false);
-    // The durable document is `attempting` (intent was committed before the effect).
+    const identity = await crashIdentity(dir, 'attempting');
+    // The durable document is `attempting` with a live token and a deadline (intent was committed first).
     const inspector = await openHarness(dir);
     try {
       const stored = await inspector.snapshot(ResourceOperations, identity.operationId, context);
       assert.equal(stored?.present, true);
       assert.equal(stored?.value?.state, 'attempting', 'the effect was recorded before it ran');
+      assert.equal(typeof stored?.value?.attemptToken, 'string', 'a live attempt token is durable');
+      assert.equal(stored?.value?.deadline, identity.deadline);
+      assert.equal(stored?.value?.effect?.payloadHash, identity.payloadHash);
     } finally {
       await inspector.close(context);
     }
 
-    const runtime = await openRuntime(dir);
+    // Only an expired deadline allows explicit recovery (never heuristic concurrent unknown).
+    await delay(Math.max(0, identity.deadline - Date.now()) + 50);
+    const effect = registryFor(async () => ({ok: true}));
+    let runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
     try {
-      const effect = countingEffect();
-      const recovered = await runtime.resources.runOperation(identity.operationId, effect.port);
-      assert.equal(recovered.state, 'unknown', 'an interrupted attempt becomes unknown');
+      const recovered = await runtime.resources.recoverOperation({
+        operationId: identity.operationId, observer: OWNER, reason: 'worker-killed',
+      });
+      assert.equal(recovered.state, 'unknown');
+      assert.match(recovered.observation ?? '', /^recovered:/);
+      assert.equal((await runtime.resources.runOperation(identity.operationId, effect.registry)).state, 'unknown');
       assert.equal(effect.calls.length, 0, 'the unknown effect is never replayed');
-      assert.equal((await runtime.resources.runOperation(identity.operationId, effect.port)).state, 'unknown');
-      assert.equal(effect.calls.length, 0);
     } finally {
       await runtime.close();
     }
@@ -508,6 +582,20 @@ test('SIGKILL after the effect started: restart marks unknown and never replays'
     } finally {
       await after.close(context);
     }
+
+    // Evidence-bound reconciliation settles it; a terminal operation is never dispatched again.
+    runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
+    try {
+      const reconciled = await runtime.resources.observeOperation({
+        operationId: identity.operationId, status: 'done', result: {ok: true}, evidence: TEST_EVIDENCE,
+        observer: OWNER, payloadHash: identity.payloadHash, controlEpoch: identity.controlEpoch,
+      });
+      assert.equal(reconciled.state, 'done');
+      assert.equal((await runtime.resources.runOperation(identity.operationId, effect.registry)).state, 'done');
+      assert.equal(effect.calls.length, 0, 'a reconciled operation is never replayed');
+    } finally {
+      await runtime.close();
+    }
   } finally {
     await rm(dir, {recursive: true, force: true});
   }
@@ -516,22 +604,24 @@ test('SIGKILL after the effect started: restart marks unknown and never replays'
 test('SIGKILL before dispatch: intent survives, is never auto-run, and runs exactly once when asked', {timeout: 60000}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'point-resource-crash-intent-'));
   try {
-    const identity = await crashIdentity(dir, 'intent', false);
+    const identity = await crashIdentity(dir, 'intent');
     const inspector = await openHarness(dir);
     try {
-      assert.equal((await inspector.snapshot(ResourceOperations, identity.operationId, context))?.value?.state,
-        'intent', 'the intent is durable before any effect');
+      const stored = await inspector.snapshot(ResourceOperations, identity.operationId, context);
+      assert.equal(stored?.value?.state, 'intent', 'the intent is durable before any effect');
+      assert.equal(stored?.value?.effect?.payloadHash, identity.payloadHash);
+      assert.equal(stored?.value?.attemptToken, null, 'an intent has no attempt token yet');
     } finally {
       await inspector.close(context);
     }
 
-    const runtime = await openRuntime(dir);
+    const effect = registryFor(async () => ({ok: true}));
+    const runtime = await openRuntime(dir, undefined, {resources: {effects: effect.registry}});
     try {
-      const effect = countingEffect();
-      const receipt = await runtime.resources.runOperation(identity.operationId, effect.port);
+      const receipt = await runtime.resources.runOperation(identity.operationId, effect.registry);
       assert.deepEqual([receipt.state, receipt.result], ['done', {ok: true}]);
       assert.equal(effect.calls.length, 1, 'an intent is dispatched exactly once when explicitly run');
-      await runtime.resources.runOperation(identity.operationId, effect.port);
+      await runtime.resources.runOperation(identity.operationId, effect.registry);
       assert.equal(effect.calls.length, 1, 'the terminal operation is not replayed');
     } finally {
       await runtime.close();

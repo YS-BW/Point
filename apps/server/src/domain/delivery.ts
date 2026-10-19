@@ -24,11 +24,24 @@ export type Delivery = Readonly<{
   attempts: number;
   result: string | null;
   error: string | null;
+  /** Attempt fencing (P0-3): only the recorded token may settle an in-flight attempt. */
+  attemptToken: string | null;
+  /** Durable worker that owns the attempt; the completing NotifyTask's id proves a dead previous invocation. */
+  workerId: string | null;
+  attemptStartedAt: number | null;
+  /** Absolute deadline for the in-flight attempt; expiry permits explicit recovery only. */
+  deadline: number | null;
   createdAt: number;
   updatedAt: number;
 }>;
 
-export type DeliveryErrorCode = 'INVALID_COMMAND' | 'DELIVERY_NOT_FOUND' | 'INVALID_TRANSITION';
+export type DeliveryErrorCode =
+  | 'INVALID_COMMAND'
+  | 'DELIVERY_NOT_FOUND'
+  | 'INVALID_TRANSITION'
+  | 'STALE_ATTEMPT'
+  | 'RECOVERY_NOT_ALLOWED'
+  | 'DELIVERY_INCOMPATIBLE';
 
 export class DeliveryError extends Error {
   constructor(readonly code: DeliveryErrorCode) {
@@ -89,16 +102,119 @@ export function initialDelivery(input: CreateDelivery): Delivery {
     attempts: 0,
     result: null,
     error: null,
+    attemptToken: null,
+    workerId: null,
+    attemptStartedAt: null,
+    deadline: null,
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
   };
 }
 
-/** intent -> attempting, recorded before the external action runs. */
+/** intent -> attempting, recorded before the external action runs (legacy token-less helper). */
 export function startDelivery(delivery: Delivery, now: number): Delivery {
   assertCount(now);
   if (delivery.status !== 'intent') throw new DeliveryError('INVALID_TRANSITION');
   return {...delivery, status: 'attempting', attempts: delivery.attempts + 1, updatedAt: now};
+}
+
+export type DeliveryAttempt = Readonly<{
+  /** CAS identity of this invocation; only this token may settle the attempt. */
+  token: string;
+  /** Stable worker identity (the Durable task id), used to prove a dead previous invocation. */
+  workerId: string;
+  startedAt: number;
+  /** Absolute deadline; the attempt is expired from this instant onwards. */
+  deadline: number;
+}>;
+
+export type DeliveryAttemptState = 'idle' | 'live' | 'expired';
+
+/** intent -> attempting with token, worker identity, start time and absolute deadline. */
+export function startDeliveryAttempt(delivery: Delivery, attempt: DeliveryAttempt): Delivery {
+  assertIdentifier(attempt.token);
+  assertIdentifier(attempt.workerId);
+  assertCount(attempt.startedAt);
+  assertCount(attempt.deadline);
+  if (attempt.deadline < attempt.startedAt) throw new DeliveryError('INVALID_COMMAND');
+  if (delivery.status !== 'intent') throw new DeliveryError('INVALID_TRANSITION');
+  return {
+    ...delivery,
+    status: 'attempting',
+    attempts: delivery.attempts + 1,
+    result: null,
+    error: null,
+    attemptToken: attempt.token,
+    workerId: attempt.workerId,
+    attemptStartedAt: attempt.startedAt,
+    deadline: attempt.deadline,
+    updatedAt: attempt.startedAt,
+  };
+}
+
+/**
+ * `idle` when no attempt is in flight; `live` while the recorded deadline has not passed; `expired`
+ * after it. A version-2 `attempting` document without a token/deadline is treated as expired
+ * (fail-closed, recoverable explicitly, never auto-replayed).
+ */
+export function deliveryAttemptState(delivery: Delivery, now: number): DeliveryAttemptState {
+  assertCount(now);
+  if (delivery.status !== 'attempting') return 'idle';
+  if (delivery.attemptToken === null || delivery.workerId === null
+    || delivery.attemptStartedAt === null || delivery.deadline === null) return 'expired';
+  return now >= delivery.deadline ? 'expired' : 'live';
+}
+
+export type DeliverySettlement =
+  | Readonly<{status: 'done'; result: string | null}>
+  | Readonly<{status: 'failed' | 'unknown'; error: string}>;
+
+/**
+ * Token-CAS settlement of an in-flight attempt: only the matching token may transition it. A
+ * terminal delivery is returned untouched (idempotent repeat); a mismatched token is `STALE_ATTEMPT`
+ * and must leave the record to the worker/recovery that won.
+ */
+export function settleDeliveryAttempt(
+  delivery: Delivery, settlement: DeliverySettlement, input: Readonly<{token: string; now: number}>,
+): Delivery {
+  assertIdentifier(input.token);
+  assertCount(input.now);
+  if (isTerminal(delivery.status)) return delivery;
+  if (delivery.status !== 'attempting') throw new DeliveryError('INVALID_TRANSITION');
+  if (delivery.attemptToken !== input.token) throw new DeliveryError('STALE_ATTEMPT');
+  if (settlement.status === 'done') {
+    if (settlement.result !== null) assertText(settlement.result);
+    return {...delivery, status: 'done', result: settlement.result, error: null, updatedAt: input.now};
+  }
+  assertText(settlement.error);
+  return {...delivery, status: settlement.status, result: null, error: settlement.error, updatedAt: input.now};
+}
+
+/** Explicit recovery of an expired attempt: only after its recorded deadline; never automatic replay. */
+export function recoverExpiredDeliveryAttempt(
+  delivery: Delivery, input: Readonly<{now: number; reason: string}>,
+): Delivery {
+  assertCount(input.now);
+  assertText(input.reason);
+  if (delivery.status !== 'attempting') throw new DeliveryError('INVALID_TRANSITION');
+  if (delivery.deadline === null || input.now < delivery.deadline) {
+    throw new DeliveryError('RECOVERY_NOT_ALLOWED');
+  }
+  return {...delivery, status: 'unknown', result: null, error: input.reason, updatedAt: input.now};
+}
+
+/**
+ * Recovery of an attempt whose exact worker is provably dead: the same Durable task resumed, so its
+ * previous invocation cannot still be running. This is the only live-deadline recovery path and is
+ * never used for a concurrent different worker.
+ */
+export function recoverInterruptedDeliveryAttempt(
+  delivery: Delivery, input: Readonly<{now: number; reason: string}>,
+): Delivery {
+  assertCount(input.now);
+  assertText(input.reason);
+  if (delivery.status !== 'attempting') throw new DeliveryError('INVALID_TRANSITION');
+  return {...delivery, status: 'unknown', result: null, error: input.reason, updatedAt: input.now};
 }
 
 function isTerminal(status: DeliveryStatus): boolean {
@@ -181,6 +297,12 @@ export function parseDelivery(value: unknown): Delivery | undefined {
     || typeof record.attempts !== 'number' || !Number.isSafeInteger(record.attempts) || record.attempts < 0
     || (record.result !== null && typeof record.result !== 'string')
     || (record.error !== null && typeof record.error !== 'string')
+    || (record.attemptToken !== null && (typeof record.attemptToken !== 'string' || !isDeliveryId(record.attemptToken)))
+    || (record.workerId !== null && (typeof record.workerId !== 'string' || !isDeliveryId(record.workerId)))
+    || (record.attemptStartedAt !== null && (typeof record.attemptStartedAt !== 'number'
+      || !Number.isSafeInteger(record.attemptStartedAt) || record.attemptStartedAt < 0))
+    || (record.deadline !== null && (typeof record.deadline !== 'number'
+      || !Number.isSafeInteger(record.deadline) || record.deadline < 0))
     || typeof record.createdAt !== 'number' || !Number.isSafeInteger(record.createdAt) || record.createdAt < 0
     || typeof record.updatedAt !== 'number' || !Number.isSafeInteger(record.updatedAt) || record.updatedAt < 0) {
     return undefined;
@@ -196,6 +318,10 @@ export function parseDelivery(value: unknown): Delivery | undefined {
     attempts: record.attempts,
     result: record.result,
     error: record.error,
+    attemptToken: record.attemptToken,
+    workerId: record.workerId,
+    attemptStartedAt: record.attemptStartedAt,
+    deadline: record.deadline,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

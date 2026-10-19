@@ -1,14 +1,22 @@
 /**
- * Artifact runtime: restricted workspace paths, atomic tmp -> fsync -> rename
- * writes, sha256 computation, the durable store adapter and verification.
+ * Artifact runtime: restricted workspace paths, hardened atomic writes, sha256
+ * computation, the durable store adapter and verification.
  *
- * A crash can leave a `writing` record or an orphan file; neither is success.
- * Verification re-reads the file and never deletes evidence.
+ * The writer mirrors the hardened file-resource adapter (P0-5): the workspace root
+ * is canonicalized with `realpath`, every path component is `lstat`ed (symlinks and
+ * non-directories rejected) and `realpath`-checked, the destination must be a regular
+ * file, the temporary file is `O_CREAT|O_EXCL|O_NOFOLLOW` at 0600 and `fstat`ed as a
+ * regular file, the parent is re-canonicalized immediately before the rename, and the
+ * published file is read back and hash/bytes-compared before success is reported.
+ *
+ * A crash can leave a `writing` record or an orphan temp file; neither is success.
+ * Verification re-reads the file through `O_NOFOLLOW` and never deletes evidence.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
 import type { Context, JsonValue } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { JsonObject, SessionDocFamilyToken, Tx } from '@earendil-works/pi-durable';
@@ -32,11 +40,19 @@ export type ArtifactDocumentAccess = Readonly<{
   commit<T>(change: (tx: Tx) => T | Promise<T>, context: Context): Promise<T>;
 }>;
 
+const O_NOFOLLOW = (constants as Readonly<Record<string, number | undefined>>).O_NOFOLLOW ?? 0;
+
+/** Fault-injection seams for the hardening tests only; production composition never sets them. */
+export type ArtifactFileHooks = Readonly<{
+  beforeRename?: (context: Readonly<{root: string; target: string; temporary: string}>) => void | Promise<void>;
+  afterRename?: (context: Readonly<{root: string; target: string}>) => void | Promise<void>;
+}>;
+
 export function workspaceDir(dataDir: string): string {
   return join(dataDir, 'workspace');
 }
 
-/** Resolve a path and require it to stay inside the workspace root. */
+/** Resolve a path and require it to stay inside the workspace root (lexical construction only). */
 function insideWorkspace(workspace: string, path: string): string {
   const root = resolve(workspace);
   const target = resolve(path);
@@ -77,45 +93,158 @@ export function sha256Hex(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
-/** File port over one workspace: 0600 temp file in the target directory, fsync, rename. */
-export function artifactFiles(workspace: string): ArtifactFilePort {
+function sha256Buffer(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+/** Relative component path of one artifact below the canonical workspace root. */
+function artifactRelativePath(artifact: Artifact): string {
+  if (!isArtifactOwnerId(artifact.jobId) || !isArtifactOwnerId(artifact.attemptId) || !isArtifactName(artifact.name)) {
+    throw new ArtifactError('INVALID_COMMAND');
+  }
+  return join('jobs', artifact.jobId, artifact.attemptId, artifactDirectoryName(artifact.id), artifact.name);
+}
+
+/**
+ * The stored absolute path is part of the durable record; it must point exactly at the canonical
+ * component layout. A forged/relocated path is rejected instead of being written to.
+ */
+function assertStoredPath(workspace: string, artifact: Artifact): string {
+  const relative = artifactRelativePath(artifact);
+  const expected = join(resolve(workspace), relative);
+  if (resolve(artifact.path) !== expected) throw new ArtifactError('INVALID_COMMAND');
+  return relative;
+}
+
+async function canonicalRoot(workspace: string, create: boolean): Promise<string> {
+  if (create) await mkdir(workspace, {recursive: true, mode: 0o700});
+  return realpath(workspace);
+}
+
+/**
+ * Walk (and, for writes, create) every component below the canonical root. Each component must be
+ * a real directory whose `realpath` is itself: a symlink anywhere in the chain is rejected, and the
+ * canonical comparison catches a parent swapped between the `lstat` and the next step.
+ */
+async function secureDirectory(root: string, components: readonly string[], create: boolean): Promise<string> {
+  let current = root;
+  for (const component of components) {
+    const next = join(current, component);
+    if (create) {
+      try {
+        await mkdir(next, {mode: 0o700});
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    }
+    const stats = await lstat(next);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) throw new ArtifactError('INVALID_COMMAND');
+    const canonical = await realpath(next);
+    if (canonical !== next) throw new ArtifactError('INVALID_COMMAND');
+    current = canonical;
+  }
+  return current;
+}
+
+async function verifyWrittenFile(target: string, artifact: Artifact): Promise<void> {
+  const handle = await open(target, constants.O_RDONLY | O_NOFOLLOW);
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new ArtifactError('INVALID_COMMAND');
+    const content = await handle.readFile();
+    if (content.byteLength !== artifact.bytes || sha256Buffer(content) !== artifact.sha256) {
+      throw new ArtifactError('ARTIFACT_WRITE_FAILED');
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/** File port over one workspace: hardened component checks, 0600 temp file, fsync, rename, read-back. */
+export function artifactFiles(workspace: string, hooks?: ArtifactFileHooks): ArtifactFilePort {
   return {
     async write(artifact, content) {
-      const target = insideWorkspace(workspace, artifact.path);
-      const directory = dirname(target);
-      await mkdir(directory, {recursive: true, mode: 0o700});
-      const temporary = join(directory, `.${randomUUID()}.tmp`);
+      assertStoredPath(workspace, artifact);
+      let temporaryPath: string | undefined;
       try {
-        const handle = await open(temporary, 'wx', 0o600);
+        const root = await canonicalRoot(workspace, true);
+        const directory = await secureDirectory(
+          root, ['jobs', artifact.jobId, artifact.attemptId, artifactDirectoryName(artifact.id)], true);
+        const target = join(directory, artifact.name);
+        const existing = await lstat(target).catch(() => undefined);
+        if (existing !== undefined && (!existing.isFile() || existing.isSymbolicLink())) {
+          throw new ArtifactError('INVALID_COMMAND');
+        }
+        temporaryPath = join(directory, `.${randomUUID()}.tmp`);
+        const handle = await open(
+          temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | O_NOFOLLOW, 0o600);
         try {
+          if (!(await handle.stat()).isFile()) throw new ArtifactError('INVALID_COMMAND');
           await handle.writeFile(content, 'utf8');
           await handle.sync();
         } finally {
           await handle.close();
         }
-        await rename(temporary, target);
+        await hooks?.beforeRename?.({root, target, temporary: temporaryPath});
+        // Re-check immediately before publishing: canonical parent, regular destination, regular temp.
+        const parentNow = await realpath(directory);
+        if (parentNow !== directory) throw new ArtifactError('INVALID_COMMAND');
+        if (!(await lstat(temporaryPath)).isFile()) throw new ArtifactError('INVALID_COMMAND');
+        const targetNow = await lstat(target).catch(() => undefined);
+        if (targetNow !== undefined && (!targetNow.isFile() || targetNow.isSymbolicLink())) {
+          throw new ArtifactError('INVALID_COMMAND');
+        }
+        await rename(temporaryPath, target);
+        await hooks?.afterRename?.({root, target});
+        const directoryHandle = await open(directory, 'r');
+        try {
+          await directoryHandle.sync();
+        } finally {
+          await directoryHandle.close();
+        }
+        // Never report success before the published bytes match the recorded sha256/bytes.
+        await verifyWrittenFile(target, artifact);
       } catch (error) {
-        await rm(temporary, {force: true}).catch(() => undefined);
-        throw error;
-      }
-      // Persist the rename itself: a crash after this point must not lose the file.
-      const directoryHandle = await open(directory, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
+        if (temporaryPath !== undefined) await rm(temporaryPath, {force: true}).catch(() => undefined);
+        if (error instanceof ArtifactError) throw error;
+        throw new ArtifactError('ARTIFACT_WRITE_FAILED');
       }
     },
 
     async inspect(artifact) {
-      const target = insideWorkspace(workspace, artifact.path);
-      let content: Buffer;
       try {
-        content = await readFile(target);
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code === 'ENOENT' ? {status: 'missing'} : {status: 'unreadable'};
+        assertStoredPath(workspace, artifact);
+      } catch {
+        return {status: 'unreadable'};
       }
-      return {status: 'read', sha256: createHash('sha256').update(content).digest('hex'), bytes: content.byteLength};
+      let directory: string;
+      try {
+        const root = await canonicalRoot(workspace, false);
+        directory = await secureDirectory(
+          root, ['jobs', artifact.jobId, artifact.attemptId, artifactDirectoryName(artifact.id)], false);
+      } catch (error) {
+        return isMissing(error) ? {status: 'missing'} : {status: 'unreadable'};
+      }
+      let handle;
+      try {
+        handle = await open(join(directory, artifact.name), constants.O_RDONLY | O_NOFOLLOW);
+      } catch (error) {
+        return isMissing(error) ? {status: 'missing'} : {status: 'unreadable'};
+      }
+      try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) return {status: 'unreadable'};
+        const content = await handle.readFile();
+        return {status: 'read', sha256: sha256Buffer(content), bytes: content.byteLength};
+      } catch {
+        return {status: 'unreadable'};
+      } finally {
+        await handle.close();
+      }
     },
   };
 }
@@ -153,7 +282,8 @@ export function artifactStore(access: ArtifactDocumentAccess, dataDir: string): 
       return document === undefined ? undefined : artifactFromDocument(document);
     },
     async save(artifact) {
-      insideWorkspace(workspace, artifact.path);
+      // The durable record must describe the canonical component layout before it is committed.
+      assertStoredPath(workspace, artifact);
       return access.commit(tx => writeArtifactDocument(tx, artifact), BACKGROUND_CONTEXT);
     },
   };

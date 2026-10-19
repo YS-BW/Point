@@ -70,16 +70,16 @@ HTTP adapter 的 outcome 表固定为：2xx→delivered；400/401/403/404/413/42
 ## 4. Notification Adapters
 
 - `adapters/notification/http.ts`：使用 `fetch`，`Idempotency-Key=deliveryId`；2xx→delivered，明确 4xx→failed，5xx/timeout/network→unknown；URL/token 只从显式 options/环境读取，不打印凭据。
-- `adapters/notification/file-outbox.ts`：每 delivery 一个 JSON 文件，tmp+fsync+rename；同 delivery 同 payload 幂等，异 payload 冲突；可重启观察已有 outbox 文件，不能把“文件存在”外推为远端已送达。
-- 两者都实现既有 `NotificationPort`，可由 `openRuntime` options 注入；默认仍 fail-closed/memory only。
+- `adapters/notification/file-outbox.ts`：每 delivery 一个 JSON 文件，tmp+fsync+rename；同 delivery 同 payload 幂等，异 payload 冲突；可重启观察已有 outbox 文件；本地写入结果是 `unknown`/`outbox-written`，不能把“文件存在”外推为远端已送达。
+- 两者都实现既有 `NotificationPort`；真实 adapter 必须由组合根显式构造并注入 `options.resources.effects`/`notification`。`openRuntime` 不自动创建 file root、CDP endpoint 或通知目标；缺省仍 fail-closed/memory only。
 
 ## 5. Browser Resource Adapter
 
-`adapters/resource/cdp.ts`：loopback/configurable CDP WebSocket client，使用 Node 22 WebSocket；连接、Target.attach、Page.enable、Page.navigate、Runtime.evaluate、Page.captureScreenshot；所有操作携带 resourceId/owner/controlEpoch/operationId，通过 ResourceCommands fence。协议错误/连接断开→unknown；observe 只查询/核销，不重放。测试注入 fake transport 验证协议帧、epoch fencing、unknown；不连接真实 Steel，不接 RTC/viewer。
+`adapters/resource/cdp.ts`：loopback/configurable CDP WebSocket client，使用 Node 22 WebSocket；连接、Target.attach、Page.enable、Page.navigate、Runtime.evaluate、Page.captureScreenshot；所有操作携带 resourceId/owner/controlEpoch/operationId，通过 ResourceCommands fence。协议错误/连接断开→unknown；observe 只查询/核销，不重放。截图必须经显式 artifact sink 并只持久化引用/哈希/大小；evaluate 默认只持久化 observationHash、valueType、valueBytes 元数据，不持久化页面值。测试注入 fake transport 验证协议帧、epoch fencing、unknown；不连接真实 Steel，不接 RTC/viewer。
 
 ## 6. Composition
 
-`openRuntime` 以 Durable resource store 为默认 `resources`；options 可注入 notification port、file root、browser adapter factories。未显式配置真实外部端点时不产生网络/浏览器动作。Adapters 可独立构造，便于离线测试。
+`openRuntime` 以 Durable resource store 为默认 `resources`；组合根负责显式构造 notification port、file effects、CDP effects 并注入 registry。`openRuntime` 不接收或自动装配 file root/browser endpoint/notification target；未显式配置真实外部端点时不产生网络/浏览器动作。Adapters 可独立构造，便于离线测试。
 
 ## 7. 验收
 

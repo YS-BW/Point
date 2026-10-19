@@ -17,6 +17,23 @@ export interface DeliveryStore {
 
 export type NotificationOutcome = 'delivered' | 'failed' | 'unknown';
 
+/** Bounded, already-redacted failure context. Never credentials, URLs with userinfo, or response bodies. */
+export type NotificationDetail = Readonly<Record<string, string | number | boolean | null>>;
+
+/**
+ * Structured notification outcome. The three-state `outcome` stays the only dispatch decision; `code`,
+ * `status` and the bounded `detail` are audit hints and must never carry secrets or response bodies.
+ */
+export type NotificationResult = Readonly<{
+  outcome: NotificationOutcome;
+  code?: string;
+  status?: number;
+  detail?: NotificationDetail;
+}>;
+
+/** Adapters may return the historical string outcome or the structured result; both mean the same three states. */
+export type NotificationSendResult = NotificationOutcome | NotificationResult;
+
 export type NotificationRequest = Readonly<{
   deliveryId: string;
   target: string;
@@ -30,7 +47,46 @@ export type NotificationRequest = Readonly<{
  * thrown error or `unknown` is never retried automatically.
  */
 export interface NotificationPort {
-  send(request: NotificationRequest): Promise<NotificationOutcome>;
+  send(request: NotificationRequest): Promise<NotificationSendResult>;
+}
+
+/** Normalize a port result to the structured form without changing its meaning. */
+export function notificationResult(result: NotificationSendResult): NotificationResult {
+  return typeof result === 'string' ? {outcome: result} : result;
+}
+
+/** The only dispatch decision: the tri-state outcome. Structured hints never change it. */
+export function notificationOutcome(result: NotificationSendResult): NotificationOutcome {
+  return typeof result === 'string' ? result : result.outcome;
+}
+
+function auditSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+}
+
+/**
+ * Redacted audit string persisted in `Delivery.error`. A legacy plain-string result keeps the exact
+ * historical value; a structured result appends only adapter-provided `code`, `status` and
+ * `detail.classification`. `detail` itself, headers, tokens, URLs and response bodies never enter it.
+ */
+export function notificationAuditError(
+  result: NotificationSendResult, fallback: 'notification-failed' | 'notification-unknown',
+): string {
+  const structured = notificationResult(result);
+  const parts: string[] = [fallback];
+  if (structured.code !== undefined) {
+    const code = auditSegment(structured.code);
+    if (code !== '') parts.push(code);
+  }
+  if (structured.status !== undefined && Number.isSafeInteger(structured.status)) {
+    parts.push(String(structured.status));
+  }
+  const classification = structured.detail?.classification;
+  if (typeof classification === 'string') {
+    const value = auditSegment(classification);
+    if (value !== '') parts.push(value);
+  }
+  return parts.join(':');
 }
 
 export interface DeliveryCommands {

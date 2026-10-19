@@ -15,6 +15,7 @@ import type { JsonValue } from '@earendil-works/chord';
 import { defineDocFamily } from '@earendil-works/pi-durable';
 import {
   ResourceError,
+  type JsonObject,
   type OperationState,
   type Resource,
   type ResourceOperation,
@@ -43,6 +44,17 @@ export type ResourceDocument = {
   value: ResourceValue | null;
 };
 
+export type ResourceOperationEffectDocument = Readonly<{
+  kind: string;
+  payload: JsonObject;
+  payloadHash: string;
+}>;
+
+/**
+ * Version-2 operation document. The secure binding fields are `null` for version-1
+ * operations written through the legacy test path; a non-null `effect` marks a
+ * secure operation whose attempt fields are significant.
+ */
 export type ResourceOperationValue = Readonly<{
   id: string;
   requestId: string;
@@ -53,6 +65,13 @@ export type ResourceOperationValue = Readonly<{
   fingerprint: string;
   result: JsonValue | null;
   observation: string | null;
+  owner: string | null;
+  effect: ResourceOperationEffectDocument | null;
+  attemptToken: string | null;
+  attemptStartedAt: number | null;
+  deadline: number | null;
+  evidence: JsonObject | null;
+  observer: string | null;
 }>;
 
 export type ResourceOperationDocument = {
@@ -89,9 +108,13 @@ export const Resources = defineDocFamily({
   initial: (document: ResourceDocument) => ({...document}),
 });
 
-/** Whole operation record; the family key is the operationId. */
+/**
+ * Whole operation record; the family key is the operationId. Version 2 adds the
+ * secure effect/attempt binding. Version-1 documents are rejected by the Durable
+ * SDK (no silent migration, no inferred effect).
+ */
 export const ResourceOperations = defineDocFamily({
-  kind: 'point.resource-operation', version: 1, scope: 'session', family: true,
+  kind: 'point.resource-operation', version: 2, scope: 'session', family: true,
   initial: (document: ResourceOperationDocument) => ({...document}),
 });
 
@@ -174,6 +197,17 @@ export function operationDocument(operation: ResourceOperation): ResourceOperati
     fingerprint: operation.fingerprint,
     result: operation.result === undefined ? null : toJsonValue(operation.result),
     observation: operation.observation ?? null,
+    owner: operation.owner ?? null,
+    effect: operation.effect === undefined ? null : {
+      kind: operation.effect.kind,
+      payload: cloneJson(operation.effect.payload as JsonValue) as JsonObject,
+      payloadHash: operation.effect.payloadHash,
+    },
+    attemptToken: operation.attemptToken ?? null,
+    attemptStartedAt: operation.attemptStartedAt ?? null,
+    deadline: operation.deadline ?? null,
+    evidence: operation.evidence === undefined ? null : cloneJson(operation.evidence as JsonValue) as JsonObject,
+    observer: operation.observer ?? null,
   };
 }
 
@@ -188,6 +222,19 @@ export function operationFromDocument(value: ResourceOperationValue): ResourceOp
     fingerprint: value.fingerprint,
     ...(value.result === null ? {} : {result: cloneJson(value.result)}),
     ...(value.observation === null ? {} : {observation: value.observation}),
+    ...(value.effect === null ? {} : {
+      owner: value.owner as string,
+      effect: {
+        kind: value.effect.kind,
+        payload: cloneJson(value.effect.payload as JsonValue) as JsonObject,
+        payloadHash: value.effect.payloadHash,
+      },
+      attemptToken: value.attemptToken,
+      attemptStartedAt: value.attemptStartedAt,
+      deadline: value.deadline as number,
+    }),
+    ...(value.evidence === null ? {} : {evidence: cloneJson(value.evidence as JsonValue) as JsonObject}),
+    ...(value.observer === null ? {} : {observer: value.observer}),
   };
 }
 

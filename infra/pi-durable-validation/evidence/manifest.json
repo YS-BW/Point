@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T04-17-20.000000+00:00",
+  "generatedAt": "2026-10-19T05:25:00.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -161,6 +161,13 @@
       "bytes": 53018,
       "sha256": "e662e1bf76cd5a7bcc3114bee334b0937b68cf04278afebb1a002e5b3d1499b5",
       "source": "WP2 Durable resource final acceptance commands",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp2-real-adapters-final-2026-10-19T05-25-00Z.json",
+      "bytes": 2531,
+      "sha256": "9037da6c1b52670986bee1757ea1cfafdb3ce3ff9a33c4f2ce4d946d0e9f291f",
+      "source": "WP2 real adapter final gate commands and independent review",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

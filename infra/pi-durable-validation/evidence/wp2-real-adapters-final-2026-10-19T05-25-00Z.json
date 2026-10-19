@@ -1,0 +1,30 @@
+{
+  "title": "WP2 real adapters final gate",
+  "generatedAt": "2026-10-19T05:25:00Z",
+  "status": "passed",
+  "scope": "Durable resource persistence plus hardened file, artifact, HTTP notification, file-outbox and loopback CDP adapters",
+  "results": [
+    {"command":"npm run check","status":"passed","details":"TypeScript noEmit and architecture boundaries passed"},
+    {"command":"npm test","status":"passed","details":"261/261 tests, 0 failed, 0 skipped; clean build included"},
+    {"command":"node --test apps/server/dist/test/resource-adapter-integration.test.js","status":"passed","details":"18/18 adversarial cross-adapter tests"},
+    {"command":"node --test apps/server/dist/test/{resource-secure,resource-durable,resource-files,resource-cdp,artifact-hardening,delivery-concurrency,notification-http,notification-outbox}.test.js","status":"passed","details":"targeted suites passed; included in 261/261 full run"},
+    {"command":"node scripts/check-boundaries.mjs","status":"passed","details":"boundary checks passed"},
+    {"command":"openspec validate agent-resource-adapter-safety --strict","status":"passed","details":"strict validation passed"},
+    {"command":"cd infra/pi-durable-validation && npm run check && POINT_CRASH_ROUNDS=1 npm test","status":"passed","details":"28/28 prototype tests passed; syntax checks passed"}
+  ],
+  "security": {
+    "independentReview":"docs/team/reviews/wp2-real-adapters-final3.md",
+    "adversarial":"apps/server/test/resource-adapter-integration.test.ts",
+    "closedBlockers":["registry substitution","payload/evidence forgery","delivery live-attempt recovery","outbox false delivery","artifact symlink/TOCTOU","CDP screenshot forgery/raw data","CDP evaluate plaintext persistence"],
+    "triState":"unknown is never automatically replayed"
+  },
+  "unverified": [
+    "real Steel or production CDP endpoint and artifact sink integration",
+    "RTC/viewer/browser-side multisession",
+    "legacy Durable migration",
+    "long-running connection/resource leak, credential rotation, capacity and Docker tests",
+    "real HTTP provider query/reconciliation and exactly-once semantics",
+    "external observer authentication/signatures beyond the in-process owner boundary"
+  ],
+  "notes":"Adapters are explicitly composed and injected; openRuntime does not auto-create file roots, browser endpoints or notification targets. Credentials and response bodies are not persisted. This evidence records local verification only and does not claim real-provider or Steel readiness."
+}

@@ -18,20 +18,36 @@ import { durableProfileStore } from './profile.js';
 import { conversationRuntime } from './conversation.js';
 import type { ConversationCommands } from '../application/conversation.js';
 import type { JobCommands } from '../application/job.js';
-import { artifactCommandsForHarness } from './artifacts.js';
+import { artifactCommandsForHarness, sha256Hex } from './artifacts.js';
 import { jobRuntime } from './jobs.js';
 import { jobToolsExtension, saveArtifactTool } from './tools.js';
 import type { DeliveryCommands, NotificationPort } from '../application/delivery.js';
 import type { FollowupCommands } from '../application/schedule.js';
-import { resourceCommands, type ResourceCommands } from '../application/resource.js';
+import {
+  canonicalJson, resourceCommands, type EffectRegistry, type ResourceCommands,
+} from '../application/resource.js';
 import { deliveryRuntime } from './deliveries.js';
 import { followupRuntime, type SessionDocumentScanner } from './schedules.js';
 import { durableResourceStore } from './resources.js';
 
 export type ModelBinding = {models: Models; model: ModelRef};
+
+/** Secure resource-effect composition options (adapters register their capabilities here). */
+export type ResourceRuntimeOptions = Readonly<{
+  effects?: EffectRegistry;
+  hash?: (canonical: string) => string;
+  token?: () => string;
+  deadlineMs?: number;
+}>;
+
 export type OpenRuntimeOptions = {
   /** External notification channel; without it notifications fail closed (`NOTIFICATION_NOT_CONFIGURED`). */
   notification?: NotificationPort;
+  /**
+   * Secure resource effects. Absent options keep the runtime fail-closed: every
+   * beginOperation whose kind is not registered is rejected with EFFECT_NOT_REGISTERED.
+   */
+  resources?: ResourceRuntimeOptions;
 };
 export type Runtime = RuntimeHandle & {
   readonly chats: ChatCommands;
@@ -100,7 +116,15 @@ export async function openRuntime(
     const workspace = join(dataDir, 'workspace');
     // WP2: external resources persist in Durable documents (single commit CAS); the memory store
     // remains test-only. Construction needs the open Harness, so it happens after Harness.open.
-    const resources = resourceCommands(durableResourceStore(harness), () => Date.now());
+    // Secure mode is the production path: registered effect kinds only, bound payload/hash,
+    // live owner/lease/epoch + attempt-token fence, deadline/abort, evidence-bound reconcile.
+    const resources = resourceCommands(durableResourceStore(harness), () => Date.now(), canonicalJson, {
+      secure: true,
+      effects: options?.resources?.effects ?? {resolve: () => undefined},
+      hash: options?.resources?.hash ?? sha256Hex,
+      token: options?.resources?.token ?? randomUUID,
+      deadlineMs: options?.resources?.deadlineMs ?? 30_000,
+    });
     const artifacts = artifactCommandsForHarness(harness, dataDir);
     const jobTools = jobToolsExtension(workspace);
     const saveArtifact = saveArtifactTool(workspace);

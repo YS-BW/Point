@@ -9,7 +9,7 @@
 | 分支 | `wp/2-real-adapters` |
 | G1 | 已通过（WP1a + WP1b 五片 + WP2 contract/memory 出口） |
 | WP2 Durable persistence | **完成**：`Runtime.resources` 默认真实 Durable store，官方 176/176 |
-| WP2 real adapters | **Ready/blocked by P0 contract**：code-auditor 提出 8 项安全缺口，先定契约再接文件/HTTP/CDP |
+| WP2 real adapters | **完成安全闸门**：18/18 adversarial、服务端 261/261、独立 final3 评审通过；真实 Steel/RTC/provider 仍未验证 |
 | Lead | lead |
 | 实现 | resource-impl（Durable store已完成，下一片负责P0/adapter） |
 | 测试 | senior-tester（resource-durable 14/14 官方） |
@@ -37,4 +37,9 @@
 7. result/observation schema、大小上限与 redaction；
 8. AbortSignal/deadline/close 取消语义。
 
-真实 adapter 在 P0 契约与回归测试通过前不接生产端点；浏览器只做 loopback CDP adapter，不接 RTC/viewer/Steel 默认端点。
+## WP2 真实 adapter 最终 gate（2026-10-19）
+
+- 根目录 `npm run check`、`npm test`：**261/261**；`scripts/*.test.mjs` 10/10；OpenSpec strict 通过。
+- `resource-adapter-integration`：**18/18**；原型 `POINT_CRASH_ROUNDS=1 npm test`：28/28；边界检查通过。
+- 安全评审：[final3](reviews/wp2-real-adapters-final3.md) 已批准；追加证据：[wp2-real-adapters-final](../../infra/pi-durable-validation/evidence/wp2-real-adapters-final-2026-10-19T05-25-00Z.json)。
+- 组合根仅显式注入 adapter effects；`unknown` 不自动重放。真实 Steel/CDP、RTC/viewer、多会话、旧库迁移、长跑/容量、真实 HTTP 查询核销与 artifact sink 集成仍未验证。

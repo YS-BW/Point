@@ -14,6 +14,7 @@
  * `tx.createTask`.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { Draft } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
@@ -22,13 +23,15 @@ import {
   type ConversationId, type Extension, type Harness, type NextTaskState, type Task, type TaskRuntime,
 } from '@earendil-works/pi-durable';
 import {
-  deliveryCommands,
-  type DeliveryCommands, type DeliveryStore, type NotificationOutcome, type NotificationPort,
+  deliveryCommands, notificationAuditError, notificationResult,
+  type DeliveryCommands, type DeliveryStore, type NotificationPort, type NotificationResult,
   type SessionDocumentScanner,
 } from '../application/delivery.js';
 import {
-  completeDelivery, failDelivery, markDeliveryUnknown, parseDelivery, reportText, startDelivery,
-  type Delivery, type DeliveryReportInput, type DeliveryStatus,
+  DeliveryError, completeDelivery, deliveryAttemptState, failDelivery, markDeliveryUnknown,
+  parseDelivery, recoverExpiredDeliveryAttempt, recoverInterruptedDeliveryAttempt, reportText,
+  settleDeliveryAttempt, startDelivery, startDeliveryAttempt,
+  type Delivery, type DeliveryReportInput, type DeliverySettlement, type DeliveryStatus,
 } from '../domain/delivery.js';
 import { Artifacts } from '../storage/artifact.js';
 import { Deliveries, ReportEntries } from '../storage/delivery.js';
@@ -45,7 +48,8 @@ export type NotifyTaskInput = Readonly<{deliveryId: string}>;
 export type NotifyCheckpoint = Readonly<{phase: 'send'}>;
 export type NotifyTaskResult = Readonly<{
   deliveryId: string;
-  status: 'done' | 'failed' | 'unknown' | 'skipped';
+  /** `in-progress`: another live worker owns the attempt; this invocation wrote nothing. */
+  status: 'done' | 'failed' | 'unknown' | 'skipped' | 'in-progress';
 }>;
 
 export type DeliveryRuntimeOptions = Readonly<{
@@ -53,6 +57,8 @@ export type DeliveryRuntimeOptions = Readonly<{
   notification?: NotificationPort;
   /** Session document scan from the composition root; absent means `list()` is empty. */
   scan?: SessionDocumentScanner;
+  /** Absolute attempt deadline window for notification sends; defaults to 60s. */
+  deadlineMs?: number;
 }>;
 
 export type DeliveryRuntime = Readonly<{
@@ -63,6 +69,7 @@ export type DeliveryRuntime = Readonly<{
 }>;
 
 const NOTIFICATION_TARGET = 'test';
+export const DEFAULT_NOTIFICATION_DEADLINE_MS = 60_000;
 
 type MutableDelivery = {-readonly [K in keyof Delivery]: Delivery[K]};
 
@@ -72,7 +79,20 @@ function applyDelivery(draft: Draft<Delivery>, value: Delivery): void {
   target.attempts = value.attempts;
   target.result = value.result;
   target.error = value.error;
+  target.attemptToken = value.attemptToken;
+  target.workerId = value.workerId;
+  target.attemptStartedAt = value.attemptStartedAt;
+  target.deadline = value.deadline;
   target.updatedAt = value.updatedAt;
+}
+
+/** Translate a Durable version/migration rejection into a stable delivery error. */
+function incompatibleDelivery(error: unknown): never {
+  if (error instanceof DeliveryError) throw error;
+  if (error instanceof Error && /version|migration/i.test(error.message)) {
+    throw new DeliveryError('DELIVERY_INCOMPATIBLE');
+  }
+  throw error;
 }
 
 function reportTerminal(deliveryId: string, status: ReportTaskResult['status']): NextTaskState<ReportCheckpoint, ReportTaskResult> {
@@ -122,7 +142,12 @@ function notificationText(runtime: unknown, job: Readonly<{title: string; result
 function durableDeliveryStore(getHarness: () => Harness, scan: SessionDocumentScanner | undefined): DeliveryStore {
   return {
     async load(deliveryId) {
-      const document = await getHarness().snapshot(Deliveries, deliveryId, BACKGROUND_CONTEXT);
+      let document;
+      try {
+        document = await getHarness().snapshot(Deliveries, deliveryId, BACKGROUND_CONTEXT);
+      } catch (error) {
+        incompatibleDelivery(error);
+      }
       return document === undefined ? undefined : parseDelivery(document);
     },
 
@@ -143,6 +168,8 @@ function durableDeliveryStore(getHarness: () => Harness, scan: SessionDocumentSc
 
 export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntime {
   const notification = options.notification;
+  const deadlineMs = options.deadlineMs ?? DEFAULT_NOTIFICATION_DEADLINE_MS;
+  if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1) throw new DeliveryError('INVALID_COMMAND');
   const commands = deliveryCommands(durableDeliveryStore(options.getHarness, options.scan));
 
   async function failChatDelivery(
@@ -210,16 +237,7 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
     runtime: TaskRuntime<NotifyTaskInput, NotifyCheckpoint, NotifyTaskResult, object>,
     delivery: Delivery,
   ): Promise<void> {
-    // Crash recovery: the send may have happened, so it must become `unknown`
-    // rather than be replayed.
-    if (delivery.status === 'attempting') {
-      await runtime.commit(async tx => {
-        const draft = await tx.doc(Deliveries, delivery.id, delivery);
-        if (draft.status === 'attempting') applyDelivery(draft, markDeliveryUnknown(delivery, 'interrupted', runtime.now()));
-        return notifyTerminal(delivery.id, 'unknown');
-      }, BACKGROUND_CONTEXT);
-      return;
-    }
+    const workerId = String(runtime.taskId);
     if (notification === undefined) {
       await failNotifyDelivery(runtime, delivery, 'NOTIFICATION_NOT_CONFIGURED');
       return;
@@ -236,40 +254,84 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
     }
     const artifact = job.artifactId === null ? undefined : await runtime.snapshot(Artifacts, job.artifactId, BACKGROUND_CONTEXT);
     const text = notificationText(runtime, job, artifact);
-    const timestamp = runtime.now();
-    const started = startDelivery(delivery, timestamp);
-    let proceed = false;
-    // Intent -> attempting is durable before the external call.
+
+    const phase: {value: 'active' | 'in-progress' | 'terminal'} = {value: 'terminal'};
+    let attemptToken = '';
+    let deadline = 0;
+    // Admission (P0-3): a live in-flight attempt belongs to another worker and is left untouched;
+    // the same Durable task resuming proves its previous invocation dead; only an expired attempt is
+    // recovered explicitly. All of it happens in one CAS commit before any external call.
     await runtime.commit(async tx => {
+      const now = runtime.now();
       const draft = await tx.doc(Deliveries, delivery.id, delivery);
-      if (draft.status !== 'intent') return notifyTerminal(delivery.id, terminalStatus(draft.status));
-      applyDelivery(draft, started);
-      proceed = true;
+      if (draft.status === 'attempting') {
+        if (draft.workerId === workerId) {
+          applyDelivery(draft, recoverInterruptedDeliveryAttempt(draft, {now, reason: 'interrupted'}));
+          phase.value = 'terminal';
+          return notifyTerminal(delivery.id, 'unknown');
+        }
+        // An attempting record without a proven worker/token/deadline cannot be attributed to a live
+        // worker; it is treated as an interrupted legacy attempt, never replayed.
+        if (draft.attemptToken === null || draft.workerId === null || draft.deadline === null) {
+          applyDelivery(draft, recoverInterruptedDeliveryAttempt(draft, {now, reason: 'interrupted'}));
+          phase.value = 'terminal';
+          return notifyTerminal(delivery.id, 'unknown');
+        }
+        if (deliveryAttemptState(draft, now) === 'expired') {
+          applyDelivery(draft, recoverExpiredDeliveryAttempt(draft, {now, reason: 'attempt-deadline-expired'}));
+          phase.value = 'terminal';
+          return notifyTerminal(delivery.id, 'unknown');
+        }
+        phase.value = 'in-progress';
+        return notifyTerminal(delivery.id, 'in-progress');
+      }
+      if (draft.status !== 'intent') {
+        phase.value = 'terminal';
+        return notifyTerminal(delivery.id, terminalStatus(draft.status));
+      }
+      attemptToken = randomUUID();
+      deadline = now + deadlineMs;
+      applyDelivery(draft, startDeliveryAttempt(draft, {
+        token: attemptToken, workerId, startedAt: now, deadline,
+      }));
+      phase.value = 'active';
       return undefined;
     }, BACKGROUND_CONTEXT);
-    if (!proceed) return;
+    if (phase.value !== 'active') return;
 
-    let outcome: NotificationOutcome;
+    let result: NotificationResult;
     try {
-      outcome = await notification.send({
+      result = notificationResult(await notification.send({
         deliveryId: delivery.id,
         target: NOTIFICATION_TARGET,
         title: job.title,
         text,
-      });
+      }));
     } catch {
-      // A thrown call cannot confirm delivery: conservative `unknown`, never a retry.
-      outcome = 'unknown';
+      // A thrown call cannot confirm delivery: conservative `unknown`, never a retry. Kept as the
+      // legacy plain outcome so existing audit strings stay stable.
+      result = {outcome: 'unknown'};
     }
-    const now = runtime.now();
-    const settled = outcome === 'delivered'
-      ? completeDelivery(started, 'delivered', now)
-      : outcome === 'failed'
-        ? failDelivery(started, 'notification-failed', now)
-        : markDeliveryUnknown(started, 'notification-unknown', now);
+    const settlement: DeliverySettlement = result.outcome === 'delivered'
+      ? {status: 'done', result: 'delivered'}
+      : result.outcome === 'failed'
+        ? {status: 'failed', error: notificationAuditError(result, 'notification-failed')}
+        : {status: 'unknown', error: notificationAuditError(result, 'notification-unknown')};
+
     await runtime.commit(async tx => {
+      const now = runtime.now();
       const draft = await tx.doc(Deliveries, delivery.id, delivery);
-      if (draft.status !== 'attempting') return notifyTerminal(delivery.id, terminalStatus(draft.status));
+      // Token CAS: another winner (recovery or concurrent worker) must never be overwritten.
+      if (draft.status !== 'attempting' || draft.attemptToken !== attemptToken) {
+        return notifyTerminal(delivery.id, terminalStatus(draft.status));
+      }
+      const deadlineAt = draft.deadline ?? deadline;
+      if (now >= deadlineAt) {
+        // A late outcome after the deadline is never turned into success.
+        applyDelivery(draft, recoverExpiredDeliveryAttempt(draft, {now, reason: 'attempt-deadline-expired'}));
+        return notifyTerminal(delivery.id, 'unknown');
+      }
+      const settled = settleDeliveryAttempt(draft, settlement, {token: attemptToken, now});
       applyDelivery(draft, settled);
       return notifyTerminal(delivery.id, terminalStatus(settled.status));
     }, BACKGROUND_CONTEXT);

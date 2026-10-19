@@ -60,7 +60,7 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 
 ## 当前实现与下一步
 
-`infra/pi-durable-validation/` 是行为与可行性参考，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`apps/server/` 已完成 WP1a、WP1b.1/2a/2b/3/4 与 WP2 资源边界内存桩，**G1 骨架就绪验收通过**；真实资源 adapter、状态迁移、计划/判断/投递的真实渠道与 API 仍按后续 WP 重建，见 [核心重建计划](agent-core-rebuild.md)、[上下文预算](context-budget.md)、[Job/Attempt 与产物](jobs-and-artifacts.md)、[计划与投递](plan-and-delivery.md) 与 [资源边界](resource-boundary.md)。`server/` 仍是只读的旧 Pi SDK 验证代码。
+`infra/pi-durable-validation/` 是行为与可行性参考，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`apps/server/` 已完成 WP1a、WP1b.1/2a/2b/3/4、WP2 Durable persistence 与真实资源 adapter 安全闸门；真实 adapter 仅按显式组合根注入，生产 Steel/RTC/provider/migration/long-run 仍未验证，见 [核心重建计划](agent-core-rebuild.md)、[上下文预算](context-budget.md)、[Job/Attempt 与产物](jobs-and-artifacts.md)、[计划与投递](plan-and-delivery.md)、[资源边界](resource-boundary.md) 与 [真实资源 Adapter](resource-adapters.md)。`server/` 仍是只读的旧 Pi SDK 验证代码。
 
 **当前优先级（2026-10-19 调整）**：先把 Agent 层坐稳——正式 Server 骨架、状态与事件契约、API v1、任务/上下文/记忆/投递的行为契约、常驻与长跑；**浏览器原生 RTC 集成暂缓**，只做止血与资源抽象。推进方式改为工作包（WP）+ 闸门，不按时间排期，人类定判断、agent 负责实现，见[实施路线](roadmap.md)与[AGENTS.md](../../AGENTS.md)。客户端流协议采用 [AG-UI 1.0](protocol-agui.md) 作为边缘投影，内部事件模型不变。必须遵守的约束见[Agent 层架构基调](agent-core.md)。
 

@@ -237,3 +237,14 @@ ID/owner 规则：`/^[A-Za-z0-9._:-]{1,128}$/`；`ttlMs` 为 `1..86400000` 的�
 - `runOperation` 的 attempt commit 与 `effect.invoke` 之间仍有一个窗口：takeover 可以在 attempt 已落盘之后、外部动作发生之前提交。CAS guard 只能保证“派发前没被抢先”，不能把外部调用与数据库事务变成原子操作。真实 adapter 必须在执行不可撤销动作前用资源端口再次 `assertControl`，或由资源侧互斥/租约机制保证；本轮内存实现不验证这一点。
 - 内存 store 用同步 Map 模拟 commit；真实 Durable store 需要单 commit 和同一组 guard 语义。多进程/异步存储重排不在本轮验证范围。
 - 不自动重试 CAS 冲突；调用方在 `RESOURCE_CONFLICT` 后重试是幂等安全的。
+
+## 11. WP2 真实 adapter 增补（2026-10-19）
+
+本节 supersede 本文件开头“本轮不实现真实 adapter/不新增 Durable schema”的历史范围描述。真实 adapter 已在独立变更中实现并通过最终安全评审：
+
+- Durable resource/operation 文档版本、owner/lease/controlEpoch、attempt token、payload/evidence/result 绑定及 unknown 观察核销均为生产前置条件；unknown 永不自动重放。
+- 文件与 Job artifact writer 使用 canonical realpath、逐级 lstat、O_NOFOLLOW/O_EXCL、0600 临时文件、fsync、原子发布与读回校验；symlink/TOCTOU 失败关闭。
+- HTTP 与 file-outbox 仅由组合根显式构造；outbox 本地写入返回 `unknown/outbox-written`，不表示远端送达。CDP 仅允许显式 loopback/configured endpoint；截图只存 artifact 引用，evaluate 只存观察元数据，不存页面原文。
+- `openRuntime` 不自动装配 file root、CDP endpoint 或通知 target；调用方必须显式构造 adapter effects 并注入 registry。真实 Steel、RTC/viewer、多会话、旧库迁移、长跑、真实 provider 查询核销和真实 artifact sink 集成仍未验证。
+
+最终代码/安全评审见 `docs/team/reviews/wp2-real-adapters-final3.md`；本片数字与命令以 `docs/design/verification-status.md` 最新 WP2 段为准。

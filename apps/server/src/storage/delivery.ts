@@ -1,9 +1,15 @@
 import { defineDocFamily, defineEntry } from '@earendil-works/pi-durable';
 import type { Delivery } from '../domain/delivery.js';
 
-/** One auditable delivery attempt; latest-only session family keyed by deliveryId. */
+/**
+ * One auditable delivery attempt; latest-only session family keyed by deliveryId.
+ *
+ * Version 2 adds the attempt fence (`attemptToken/workerId/attemptStartedAt/deadline`). No migration
+ * is installed: a version-1 document is rejected by the Durable SDK (stable `DELIVERY_INCOMPATIBLE`
+ * at the store boundary) instead of being silently upgraded without a worker identity.
+ */
 export const Deliveries = defineDocFamily({
-  kind: 'point.delivery', version: 1, scope: 'session', family: true,
+  kind: 'point.delivery', version: 2, scope: 'session', family: true,
   initial: (delivery: Delivery) => ({...delivery, occurrenceIds: [...delivery.occurrenceIds]}),
 });
 

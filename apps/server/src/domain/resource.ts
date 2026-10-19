@@ -31,22 +31,14 @@ export type Resource = Readonly<{
 
 export type OperationState = 'intent' | 'attempting' | 'done' | 'unknown' | 'failed';
 
-export type ResourceOperation = Readonly<{
-  id: string;
-  requestId: string;
-  resourceId: ResourceId;
-  controlEpoch: ControlEpoch;
-  state: OperationState;
-  revision: number;
-  fingerprint: string;
-  result?: unknown;
-  observation?: string;
-}>;
-
 export type ResourceErrorCode =
   | 'INVALID_COMMAND' | 'RESOURCE_NOT_FOUND' | 'RESOURCE_BUSY' | 'LEASE_EXPIRED'
   | 'STALE_CONTROL' | 'RESOURCE_CONFLICT' | 'OPERATION_NOT_FOUND'
-  | 'INVALID_TRANSITION' | 'IDEMPOTENCY_CONFLICT';
+  | 'INVALID_TRANSITION' | 'IDEMPOTENCY_CONFLICT'
+  // Secure effect protocol (WP2 real adapters)
+  | 'IN_PROGRESS' | 'STALE_ATTEMPT' | 'EFFECT_NOT_REGISTERED' | 'INVALID_EVIDENCE'
+  | 'RECOVERY_REQUIRED' | 'OPERATION_INCOMPATIBLE' | 'PAYLOAD_REJECTED'
+  | 'RESULT_REJECTED' | 'DEADLINE_EXCEEDED';
 
 /** Stable error codes; the future API error mapping reads `code`, never the message. */
 export class ResourceError extends Error {
@@ -279,4 +271,194 @@ export function reconcile(operation: ResourceOperation, reconciliation: Reconcil
     reconciliation.result,
   );
   return reconciliation.observation === undefined ? settled : {...settled, observation: reconciliation.observation};
+}
+
+/* -------------------------------------------------------------------------- */
+/* Secure effect protocol (P0, WP2 real adapters)                              */
+/* -------------------------------------------------------------------------- */
+
+/** Pure JSON value shape for persisted effect payloads/evidence/results. */
+export type JsonPrimitive = null | boolean | number | string;
+export type JsonValue = JsonPrimitive | JsonValue[] | {[key: string]: JsonValue};
+export type JsonObject = {[key: string]: JsonValue};
+
+export function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+export type ResourceEffect = Readonly<{
+  /** Registered capability discriminator; never a dynamic module name. */
+  kind: string;
+  payload: JsonObject;
+  payloadHash: string;
+}>;
+
+/**
+ * Version-1 operation shape plus the secure binding. The binding fields are
+ * optional only so version-1 memory-only callbacks/tests keep their literal shape;
+ * every operation created by a secure `beginOperation` persists all of them.
+ */
+export type ResourceOperation = Readonly<{
+  id: string;
+  requestId: string;
+  resourceId: ResourceId;
+  controlEpoch: ControlEpoch;
+  state: OperationState;
+  revision: number;
+  fingerprint: string;
+  owner?: OwnerId;
+  effect?: ResourceEffect;
+  attemptToken?: string | null;
+  attemptStartedAt?: number | null;
+  deadline?: number;
+  evidence?: JsonObject;
+  observer?: string;
+  result?: unknown;
+  observation?: string;
+}>;
+
+/** An operation that carries the full secure binding; adapters may rely on these fields. */
+export type SecureResourceOperation = ResourceOperation & Readonly<{
+  owner: OwnerId;
+  effect: ResourceEffect;
+  attemptToken: string | null;
+  attemptStartedAt: number | null;
+  deadline: number;
+}>;
+
+/** Narrow to the secure shape; throws INVALID_COMMAND for a version-1 operation. */
+export function assertSecureOperation(operation: ResourceOperation): asserts operation is SecureResourceOperation {
+  if (operation.owner === undefined
+    || operation.effect === undefined
+    || operation.attemptToken === undefined
+    || operation.attemptStartedAt === undefined
+    || operation.deadline === undefined
+    || !isIdentifier(operation.owner)
+    || !isIdentifier(operation.effect.kind)
+    || typeof operation.effect.payloadHash !== 'string'
+    || operation.effect.payloadHash.length === 0
+    || !isJsonObject(operation.effect.payload)
+    || (operation.attemptToken !== null && !isIdentifier(operation.attemptToken))
+    || (operation.attemptStartedAt !== null && !isSafeNonNegativeInteger(operation.attemptStartedAt))
+    || !isSafeNonNegativeInteger(operation.deadline)) {
+    throw new ResourceError('INVALID_COMMAND');
+  }
+}
+
+function assertToken(value: unknown): asserts value is string {
+  if (!isIdentifier(value)) throw new ResourceError('INVALID_COMMAND');
+}
+
+/** intent -> attempting with a durable worker token, start time and deadline. */
+export function attemptWithToken(
+  operation: ResourceOperation,
+  input: Readonly<{token: string; startedAt: number; deadline: number}>,
+): ResourceOperation {
+  assertToken(input.token);
+  assertTime(input.startedAt);
+  assertTime(input.deadline);
+  if (operation.state !== 'intent') throw new ResourceError('INVALID_TRANSITION');
+  assertSecureOperation(operation);
+  return {
+    ...operation,
+    state: 'attempting',
+    revision: operation.revision + 1,
+    attemptToken: input.token,
+    attemptStartedAt: input.startedAt,
+    deadline: input.deadline,
+  };
+}
+
+/** attempting -> done | failed, but only for the worker holding the token. */
+export function settleAttempt(
+  operation: ResourceOperation,
+  settlement: Readonly<{state: 'done' | 'failed'; result?: unknown; token: string}>,
+): ResourceOperation {
+  assertSettlementState(settlement.state);
+  assertToken(settlement.token);
+  if (operation.state === 'done' || operation.state === 'failed') return operation;
+  if (operation.state !== 'attempting') throw new ResourceError('INVALID_TRANSITION');
+  assertSecureOperation(operation);
+  if (operation.attemptToken !== settlement.token) throw new ResourceError('STALE_ATTEMPT');
+  return withResult(
+    {...operation, state: settlement.state, revision: operation.revision + 1},
+    settlement.result,
+  );
+}
+
+/**
+ * attempting -> unknown. A live worker passes its token; explicit recovery omits it
+ * and is only allowed by the application after the deadline has expired.
+ */
+export function markAttemptUnknown(
+  operation: ResourceOperation,
+  input: Readonly<{token?: string; observation?: string}>,
+): ResourceOperation {
+  assertObservation(input.observation);
+  if (operation.state !== 'attempting') throw new ResourceError('INVALID_TRANSITION');
+  assertSecureOperation(operation);
+  if (input.token !== undefined) {
+    assertToken(input.token);
+    if (operation.attemptToken !== input.token) throw new ResourceError('STALE_ATTEMPT');
+  }
+  return {
+    ...operation,
+    state: 'unknown',
+    revision: operation.revision + 1,
+    ...(input.observation === undefined ? {} : {observation: input.observation}),
+  };
+}
+
+export type SecureReconciliation = Readonly<{
+  state: 'done' | 'failed';
+  evidence: JsonObject;
+  observer: string;
+  payloadHash: string;
+  result?: unknown;
+  observation?: string;
+}>;
+
+/**
+ * unknown -> done | failed, bound to the operation payload and an authenticated
+ * observer. Capability-specific evidence validation happens in the application
+ * layer before this pure transition runs.
+ */
+export function reconcileWithEvidence(
+  operation: ResourceOperation,
+  reconciliation: SecureReconciliation,
+): ResourceOperation {
+  assertSettlementState(reconciliation.state);
+  assertObservation(reconciliation.observation);
+  assertToken(reconciliation.observer);
+  if (!isJsonObject(reconciliation.evidence)) throw new ResourceError('INVALID_EVIDENCE');
+  if (transportJsonBytes(reconciliation.evidence) > MAX_EVIDENCE_BYTES) {
+    throw new ResourceError('INVALID_EVIDENCE');
+  }
+  if (operation.state === 'done' || operation.state === 'failed') return operation;
+  if (operation.state !== 'unknown') throw new ResourceError('INVALID_TRANSITION');
+  assertSecureOperation(operation);
+  if (reconciliation.payloadHash !== operation.effect.payloadHash) {
+    throw new ResourceError('INVALID_EVIDENCE');
+  }
+  const settled = withResult(
+    {...operation, state: reconciliation.state, revision: operation.revision + 1},
+    reconciliation.result,
+  );
+  return {
+    ...settled,
+    evidence: reconciliation.evidence,
+    observer: reconciliation.observer,
+    ...(reconciliation.observation === undefined ? {} : {observation: reconciliation.observation}),
+  };
+}
+
+/** Hard upper bound for evidence JSON, enforced again per capability. */
+export const MAX_EVIDENCE_BYTES = 8_192;
+
+/** UTF-8 byte length of a JSON value (application/storage also bound payloads/results). */
+export function transportJsonBytes(value: JsonValue): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }

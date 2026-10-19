@@ -22,9 +22,23 @@ import {
 /** The part of Harness this store needs; everything else is the owning runtime's concern. */
 export type ResourceHarness = Pick<Harness, 'snapshot' | 'commit'>;
 
+/** Translate a Durable version/migration rejection into the stable resource code. */
+function incompatible(error: unknown): never {
+  if (error instanceof ResourceError) throw error;
+  if (error instanceof Error && /version|migration/i.test(error.message)) {
+    throw new ResourceError('OPERATION_INCOMPATIBLE');
+  }
+  throw error;
+}
+
 export function durableResourceStore(harness: ResourceHarness): ResourceStore {
   async function loadOperation(id: string): Promise<ResourceOperation | undefined> {
-    const document = await harness.snapshot(ResourceOperations, id, BACKGROUND_CONTEXT);
+    let document;
+    try {
+      document = await harness.snapshot(ResourceOperations, id, BACKGROUND_CONTEXT);
+    } catch (error) {
+      incompatible(error);
+    }
     if (document === undefined || !document.present || document.value === null) return undefined;
     return operationFromDocument(document.value);
   }
@@ -70,9 +84,14 @@ export function durableResourceStore(harness: ResourceHarness): ResourceStore {
         }
 
         const operationWrite = mutation.operation;
-        const operationDraft = operationWrite === undefined
-          ? undefined
-          : await tx.doc(ResourceOperations, operationWrite.value.id, ABSENT_OPERATION);
+        let operationDraft;
+        try {
+          operationDraft = operationWrite === undefined
+            ? undefined
+            : await tx.doc(ResourceOperations, operationWrite.value.id, ABSENT_OPERATION);
+        } catch (error) {
+          incompatible(error);
+        }
         const requestKey = operationWrite === undefined
           ? undefined
           : resourceRequestKey(resourceId, operationWrite.value.requestId);
@@ -86,6 +105,11 @@ export function durableResourceStore(harness: ResourceHarness): ResourceStore {
             if (current !== undefined) throw new ResourceError('RESOURCE_CONFLICT');
           } else if (current === undefined || current.revision !== operationWrite.expectedRevision) {
             throw new ResourceError('RESOURCE_CONFLICT');
+          }
+          if (operationWrite.expectedAttemptToken !== undefined) {
+            // Token CAS: a settlement may only win while its attempt token is current.
+            const currentToken = current === undefined || current.effect === null ? null : current.attemptToken;
+            if (currentToken !== operationWrite.expectedAttemptToken) throw new ResourceError('RESOURCE_CONFLICT');
           }
           const indexed = requestDraft.present ? requestDraft.operationId : null;
           if (indexed !== null && indexed !== operationWrite.value.id) throw new ResourceError('RESOURCE_CONFLICT');

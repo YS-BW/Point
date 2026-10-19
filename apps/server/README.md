@@ -1,6 +1,6 @@
 # Point Server foundation
 
-WP1a：独立可运行的基础骨架。WP1b.1 新增内部对话创建/读取端口，WP1b.2a 提供显式模型绑定下的消息/排队/停止/历史应用接口，WP1b.2b 提供显式 Profile、context sections 与受保护的手动压缩；WP2 落地资源租约、控制权 epoch 与副作用三态的应用/领域契约（内存桩，未持久化）；工具、定时任务、真实资源与浏览器尚未实现；健康接口只报告 foundation。
+WP1a：独立可运行的基础骨架。WP1b.1 新增内部对话创建/读取端口，WP1b.2a 提供显式模型绑定下的消息/排队/停止/历史应用接口，WP1b.2b 提供显式 Profile、context sections 与受保护的手动压缩；WP2 已落地 Durable 资源租约、控制权 epoch、副作用三态与安全的文件/通知/CDP adapter 契约。真实外部端点仍须由组合根显式注入；Steel/RTC/provider/迁移/长跑未验证。健康接口只报告 foundation。
 
 在仓库根目录，Node >=22.19：
 
@@ -65,7 +65,7 @@ const operation = await commands.beginOperation({
 const outcome = await commands.runOperation(operation.id, {invoke: async () => 'done-result'});
 ```
 
-`unknown` 用 `observeOperation({operationId, status, result, observation})` 核销。真实资源接入必须实现 Durable 持久化 store，并在不可撤销动作前按 `controlEpoch` 再次自检；本轮不接任何真实浏览器/文件/通知 adapter，也没有 HTTP 映射。契约与未验证项见 [资源边界](../../docs/design/resource-boundary.md)。
+`unknown` 用 `observeOperation({operationId, status, result, observation})` 核销。真实资源 adapter 通过显式 effects registry 接入 Durable store；文件、HTTP/outbox 与 loopback CDP 均 fail-closed、unknown 不重放，CDP 不接 Steel/RTC/viewer。真实端点、旧库迁移、长跑与 provider 查询核销未验证。契约与未验证项见 [资源边界](../../docs/design/resource-boundary.md) 与 [真实 Adapter](../../docs/design/resource-adapters.md)。
 
 ## 上下文、Profile 与压缩（WP1b.2b）
 

@@ -163,3 +163,11 @@
 1. 更新数字只改本表，并同时更新"时点"。
 2. 新增证据必须写清边界；"通过"不等于产品可用。
 3. 其他文档引用数字前，先核对本表；旧文档不追改，但不得与之冲突。
+
+## WP2 真实浏览器/文件/通知 Adapter 与 Durable 持久化最终闸门（2026-10-19）
+
+最终官方窗口：根目录 `npm run check`、`npm test`、边界检查与 OpenSpec strict 均通过；原型 `npm run check && POINT_CRASH_ROUNDS=1 npm test` 通过。服务端干净构建后全量 **261/261 项通过，0 fail / 0 skip**；跨 adapter adversarial integration **18/18**；独立最终安全评审通过。追加证据：[WP2 real adapters final](../../infra/pi-durable-validation/evidence/wp2-real-adapters-final-2026-10-19T05-25-00Z.json)，最终评审：[final3](../team/reviews/wp2-real-adapters-final3.md)。
+
+本片闭合：runtime-owned registry 防替换、payload/evidence/result 绑定、owner/lease/epoch/attempt token 与 Delivery fencing、HTTP 分类及 redacted structured audit、file-outbox `unknown/outbox-written` 语义、文件与 artifact symlink/TOCTOU 硬化、CDP screenshot artifact 引用与 evaluate 元数据化脱敏。`unknown` 永不自动重放；真实 adapter 由组合根显式构造并注入，`openRuntime` 不自动创建 file root、CDP endpoint 或 notification target。
+
+未验证且不得外推：真实 Steel/生产 CDP 与 artifact sink 集成、RTC/viewer/浏览器侧多会话、旧 Durable 库迁移、数天/数周长跑与连接泄漏、凭据轮换/并发容量/Docker、真实 HTTP provider 查询核销与 exactly-once、外部 observer 的签名认证。v1 文档拒绝仍依赖 SDK 错误文案正则，作为后续 typed-error 改进项；本片不宣称真实 provider 已就绪。
