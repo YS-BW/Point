@@ -5,9 +5,9 @@
 
 ## 当前交付与长期方向
 
-**2026-10-19 用户确认**：本次交付仅包含基础骨架与稳定性验收（WP1a）；产品迁移（WP1b）单独实施。WP1a 的完成不再因待迁移产品能力而阻塞，但不代表 WP1 整体或 G1 已完成。
+**2026-10-19 最新决定**：WP1a 基础骨架已交付。用户指出原型在稳定性和扩展性上不足，要求 WP1b 从工程角度重建；此前“直接迁移、保留全部实现行为”的执行方式被本决定取代。
 
-本次按用户要求将架构与骨架落地为 **WP1a**，将原 WP1 的完整迁移保留为 **WP1b**。这不是缩减 WP1 的出口：原型全部离线回归仍须在正式服务独立通过。WP1a 完成不代表 WP1、G1 或完整 Agent 可用。实际验收见 [验证状态](verification-status.md)。
+WP1b 以产品行为契约和失败语义为出口，原型只提供案例与可行性证据。旧离线套件继续作为原型回归，不要求机械复制测试数量，也不把原型偶然行为当作产品要求。正式实现独立测试，每片同时验证持久化、幂等与恢复。实际完成状态见 [验证状态](verification-status.md)，执行明细见 [核心重建计划](agent-core-rebuild.md)。
 
 架构以 [server-architecture](server-architecture.md) 和 [ADR-002](adr/ADR-002-server-foundation.md) 为准。WP1a 的 root 构建、CI、文档与应用代码由一个 owner 串行修改；不启动团队流程提案，不占用浏览器 lane。
 
@@ -37,7 +37,7 @@
 |---|---|---|---|---|
 | **WP0** ✅ | 基线：仓库、证据入库、备份脚本、CI、凭据 | — | 全新克隆 `npm ci && check && test` 全绿 | 已完成 |
 | **WP1a** | 长期架构、模块边界、TypeScript Server 基础生命周期、独立测试 | WP0 | 根目录 `npm ci --ignore-scripts && npm run check && npm test`；真实 Durable 初始化/锁/关闭/版本拒绝；原型规定回归仍绿 | `apps/server/**`、根构建/CI、设计/OpenSpec、新增证据（串行） |
-| **WP1b** | 将原型产品链路迁入正式模块：会话、后台工作、上下文/显式记忆、投递；保留现有行为 | WP1a | 原型全部离线回归在正式结构独立通过；domain 无 defineTask；纯规则单测不 spawn 服务；无对原型源码/测试钩子依赖 | `apps/server/**`；迁移不改功能，数据库迁移另交 WP3 |
+| **WP1b** | 正式 Agent 核心工程化重建：命令、消息/上下文、执行、计划与投递，按独立分片推进 | WP1a | 逐条产品契约及失败矩阵独立通过；domain 无 defineTask；无原型源码/测试钩子依赖；每片持久写入即验收恢复 | `apps/server/**`、设计/OpenSpec/证据，串行；旧库迁移另交 WP3 |
 | **WP2** | 资源抽象：`resource{owner,lease,controlEpoch,state}` 接口 + `adapters/resource`；文件/通知/浏览器统一"意图→执行→三态"；domain 不 import 具体实现 | WP1 | 同一接口能用内存桩跑通租约、过期、`unknown`；`grep` 证明 domain 无 steel/cdp | `apps/server/src/adapters/**`、`domain/**` |
 | **WP3** | 状态 v2 + 迁移：`point.meta/chats/chat/memory/job/jobs/browser/requests` 分片；事件改时间线；单 commit 迁移；升级前自动备份；版本闸门 | WP1（与 WP4 可并行，但**事务组唯一 owner**） | v1 夹具库升级语义等值；重启两次迁移幂等；恢复 pre-v2 快照可启动；请求账本有清扫 | `apps/server/src/storage/**`、`runtime/**` |
 | **WP4** | API v1 基础契约：`/v1`、错误码对象、所有写操作幂等键、`/inspect` 门控、鉴权、访问日志 | WP1 | 契约测试覆盖 400/404/409/413/503；重放响应逐字节相等 | `apps/server/src/api/**` |
@@ -52,7 +52,7 @@
 
 ```mermaid
 flowchart LR
-    WP0[WP0 基线 ✅] --> WP1[WP1a 基础 → WP1b 迁移]
+    WP0[WP0 基线 ✅] --> WP1[WP1a 基础 → WP1b 重建]
     WP1 --> WP2[WP2 资源抽象]
     WP1 --> WP3[WP3 状态 v2]
     WP1 --> WP4[WP4 API v1]
@@ -88,7 +88,7 @@ flowchart LR
 
 ## 4. 串行规则（违反就会返工）
 
-1. **状态 schema 与事务组**：WP3 与 WP6 必须同一 owner 顺序推进；其他 lane 在 G3 前不得改 schema。
+1. **状态 schema 与事务组**：WP1b 的新增分片 schema 由当前唯一 owner 串行设计并验收；WP3 负责旧库迁移与升级框架，WP6 随后推进，其他 lane 不并发改 schema。
 2. **接口冻结点**：WP1b 的 ports 验收完成 → 各 lane 才能并行；WP2 的资源接口 → adapter 才能写；WP4 的 API 形状 → WP5 才能写；WP5 的事件形状 → Web 才能接。
 3. **一个 WP = 一个分支/PR**：迁移提交必须独立，不夹带功能改动。
 4. **契约变更需 owner 批准**：改测试断言等于改契约，必须由对应 lane owner 确认。
@@ -145,7 +145,7 @@ flowchart LR
 
 ## 7. 反模式
 
-1. 在 WP1 期间顺手加功能——只搬不改，否则测试基线失效。
+1. 把原型源码搬进正式目录当作重建完成；或以旧测试数量代替产品契约及故障验收。
 2. 浏览器推迟但资源抽象写成"浏览器专用"。
 3. 先做 UI 再定契约。
 4. 迁移与功能混在一个 PR。
@@ -174,6 +174,6 @@ flowchart LR
 
 ## 9. 每个工作包的落地顺序
 
-先固定行为案例与失败语义，再写领域规则和 ports，再实现 Durable 事务与 task，最后实现 adapter/API/客户端。新增持久状态前设计迁移，新增外部动作前写 unknown 用例。针对每个交付，回答：谁是权威、谁持有事务、如何去重、取消/修订后如何拒绝旧结果、重启时如何恢复、如何证明用户目标完成。
+先核查锁定 Durable SDK 的公开能力与实现，记录复用项和确实缺少的产品契约；再固定用户行为案例与失败语义，再写领域规则和 ports，再实现 Durable 事务与 task，最后实现 adapter/API/客户端。新增持久状态前设计迁移，新增外部动作前写 unknown 用例。针对每个交付，回答：谁是权威、谁持有事务、如何去重、取消/修订后如何拒绝旧结果、重启时如何恢复、如何证明用户目标完成。
 
 不先搭建通用插件市场、自动多 Agent 团队或分布式平台。只有真实用例需要的抽象进入工程；后续改变外部能力时通过 resource/delivery/context 边界扩展，而不是修改 Durable 内核。

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T00:38:59.051788+00:00",
+  "generatedAt": "2026-10-19T01:00:22.124192+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -99,6 +99,20 @@
       "sha256": "b2a234180d1aebed569db0083f5dd0a9612505625d1b38c20c8306fcebd3f43c",
       "source": "git checkout-index to independent temporary directory, npm ci/check/test",
       "normalized": "absolute home prefix and temporary checkout path normalized"
+    },
+    {
+      "file": "wp1b-commands-2026-10-19T00-46-57Z.json",
+      "bytes": 15421,
+      "sha256": "347bd28d6884b390ff12aeaba66911d082d15dc32bbf034edcb7793d5ee9ab14",
+      "source": "WP1b.1 local acceptance commands",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1b-experience-2026-10-19T01-00-22Z.json",
+      "bytes": 18505,
+      "sha256": "a9e4e7e99c93c0b4d1c3e28f7bd2f924b39603f2bae45e730f47dce1db68b380",
+      "source": "WP1b.2a local acceptance commands",
+      "normalized": "absolute home prefix -> <home>"
     }
   ]
 }

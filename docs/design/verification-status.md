@@ -41,6 +41,22 @@
 
 本次所有数据库验证使用新临时目录，不打开个人原型数据；覆盖 latest 之前已把原型 latest JSON 备份到 `/tmp/point-pre-wp1a-tests-2026-10-18T19-38-14Z/`。正式骨架与原型证据分别记录，不相互替代。
 
+## WP1b.1 对话命令重建（2026-10-19）
+
+2026-10-19T00:46:57Z，根目录 `npm run check && npm test` 通过，**26 项测试全部通过，0 fail / 0 skip**。其中本片独立对话命令测试 **7 项**：参数规则、并发去重及异参冲突、不同键隔离、事务回滚、未来收据版本拒绝、提交前和提交后响应前 SIGKILL。正式实现没有原型依赖或生产故障钩子。
+
+原型 `npm run check` 与 `POINT_CRASH_ROUNDS=1 npm test` 同时通过（**28 项，0 fail / 0 skip**）；原型源码与测试未修改。OpenSpec strict、diff check 通过。证据：[WP1b.1 完整验收输出](../../infra/pi-durable-validation/evidence/wp1b-commands-2026-10-19T00-46-57Z.json)。原型 latest JSON 运行前已备份，路径在证据中；所有数据库用临时目录，未迁移个人数据。
+
+完成：内部应用端口的创建/读取、规范化输入、持久幂等收据、单 commit 原子创建与重启恢复。路线已按用户要求改为工程化重建，详见 [核心重建计划](agent-core-rebuild.md)。**仅 WP1b.1 完成，WP1b 和 G1 未完成**。未验证/未实现：消息与模型执行、上下文/USER.md、Job/Attempt、定时与投递、公开命令 API、浏览器、Docker、长期负载和跨产品版本迁移。正式 HTTP 仍只报告 foundation，测试通过不代表完整 personal agent 可用。
+
+## WP1b.2a 对话执行重建（2026-10-19）
+
+2026-10-19T01:00:22Z，根目录 `npm run check && npm test` 通过，**37 项测试全部通过，0 fail / 0 skip**。其中本片新增对话体验测试 **11 项**：发送后离开与重试去重、忙时补充排队、停止旧任务后继续、多会话隔离、供应商失败呈现未回答、模型处理中 SIGKILL 不重发、停止途中 SIGKILL 后新问题可继续、模型派发前取消、缺少保护标记时拒绝调用、历史分页与夹具耗时、空消息/未知会话/未配置模型。
+
+实现复用原生 Durable loop、inbox 与 Submission，未新增消息队列或第二执行引擎；模型调用的 intent-before-effect 与 `unknown` 不重放由 `point.model-call` 文档和 dispatch 保护层承担。原型 `npm run check` 与 `POINT_CRASH_ROUNDS=1 npm test`（**28 项，0 fail / 0 skip**）同时通过，原型源码与测试未修改。证据：[WP1b.2a 完整验收输出](../../infra/pi-durable-validation/evidence/wp1b-experience-2026-10-19T01-00-22Z.json)。
+
+完成：内部对话执行端口的发送、排队、停止、状态、等待与历史查询。**仅 WP1b.1/2a 完成，WP1b 与 G1 未完成**。未实现/未验证：上下文 sections、USER.md、压缩、Job/Attempt、工具与产物、计划/判断/投递/通知、公开 HTTP/AG-UI、浏览器、Docker、真实模型语义、供应商限流退避、长期负载和跨产品版本迁移。
+
 ## 已被取代、不要引用的旧口径
 
 - `runtime/acceptance-summary.json` 写 `testsPassed 24/24`，是 2026-10-18T03:08Z 的旧口径（当时还没有后 4 项）。**不要引用。**

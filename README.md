@@ -2,7 +2,7 @@
 
 一个人的、持续运行的 personal agent。参考 Muse 的产品形态：长期主会话、可持续的主题侧聊、独立后台执行、共享记忆、可观看与接管的浏览器、可交付的产物。**只服务一个人**，不建设多用户、租户、团队或角色系统。
 
-> **当前状态：可运行原型阶段，尚未产品化。** 执行与恢复、会话与任务链路、浏览器接管互斥已有进程级验收；正式 Server 已建立 WP1a 基础骨架，产品能力迁移、Web 客户端、Steel 原生 RTC 控制权、鉴权与常驻部署仍待实现。判断依据见[项目现状分析](docs/project-status-2026-10-19.md)，证据数字见[验证状态](docs/design/verification-status.md)。
+> **当前状态：可运行原型阶段，尚未产品化。** 执行与恢复、会话与任务链路、浏览器接管互斥已有进程级验收；正式 Server 已建立 WP1a 基础骨架，WP1b.1/2a 的对话创建、消息执行、排队、停止与历史查询已落地；上下文、任务/工具、投递、Web 客户端、Steel 原生 RTC 控制权、鉴权与常驻部署仍待实现。证据数字见[验证状态](docs/design/verification-status.md)。
 
 ## 架构
 
@@ -28,7 +28,7 @@ flowchart TD
 
 | 路径 | 内容 |
 |---|---|
-| [`apps/server/`](apps/server/README.md) | 正式 Server 基础骨架；产品链路待 WP1b 迁移 |
+| [`apps/server/`](apps/server/README.md) | 正式 Server 基础骨架；产品链路按 WP1b 工程化重建 |
 | [`infra/pi-durable-validation/`](infra/pi-durable-validation/README.md) | **当前活跃实现**：可运行原型、CLI、故障注入、真实 Steel/WebRTC 验收 |
 | [`infra/pi-durable-validation/evidence/`](infra/pi-durable-validation/evidence/README.md) | 已入库的验收证据（JSON + SHA-256 清单 + 复现命令） |
 | [`docs/design/`](docs/design/README.md) | 现行设计与实施顺序 |
