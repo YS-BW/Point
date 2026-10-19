@@ -139,6 +139,19 @@ export function memoryDocument(entry: ProfileEntry, revision: number): MemoryDoc
   };
 }
 
+/**
+ * Same-commit memory counter. The profile cap must be decided inside the write transaction; a count
+ * read before the commit can be stale under concurrent commands (unique-key inserts could bypass the
+ * 64-entry limit). The counter is derived state (migration/bootstrapping seeds it from the entry set).
+ */
+export type MemoryCounterDocument = {count: number};
+
+export const MemoryCounter = defineDocFamily({
+  kind: 'point.memory-count', version: 1, scope: 'session', family: true,
+  initial: (count: number): MemoryCounterDocument => ({count}),
+});
+export const MEMORY_COUNTER_KEY = 'default';
+
 export function memoryEntry(document: Readonly<MemoryDocument>): ProfileEntry {
   return {
     key: document.key,
