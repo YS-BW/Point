@@ -34,6 +34,7 @@ import {
   type Delivery, type DeliveryReportInput, type DeliverySettlement, type DeliveryStatus,
 } from '../domain/delivery.js';
 import { Artifacts } from '../storage/artifact.js';
+import { appendEvent } from './events.js';
 import { Deliveries, ReportEntries } from '../storage/delivery.js';
 import { Jobs } from '../storage/job.js';
 
@@ -179,7 +180,14 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
   ): Promise<void> {
     await runtime.commit(async tx => {
       const draft = await tx.doc(Deliveries, delivery.id, delivery);
-      if (draft.status === 'intent') applyDelivery(draft, failDelivery(delivery, error, runtime.now()));
+      if (draft.status === 'intent') {
+        const failed = failDelivery(delivery, error, runtime.now());
+        applyDelivery(draft, failed);
+        await appendEvent(tx, {
+          type: 'delivery.failed', aggregate: 'delivery', aggregateId: delivery.id,
+          revision: delivery.revision, at: failed.updatedAt, data: {channel: 'chat', error},
+        });
+      }
       return reportTerminal(delivery.id, 'failed');
     }, BACKGROUND_CONTEXT);
   }
@@ -212,7 +220,12 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
     await runtime.commit(async tx => {
       const draft = await tx.doc(Deliveries, delivery.id, delivery);
       if (draft.status !== 'intent') return reportTerminal(delivery.id, terminalStatus(draft.status));
-      applyDelivery(draft, completeDelivery(startDelivery(delivery, timestamp), 'delivered', timestamp));
+      const done = completeDelivery(startDelivery(delivery, timestamp), 'delivered', timestamp);
+      applyDelivery(draft, done);
+      await appendEvent(tx, {
+        type: 'delivery.done', aggregate: 'delivery', aggregateId: delivery.id,
+        revision: delivery.revision, at: timestamp, data: {channel: 'chat', jobId: job.id},
+      });
       await tx.appendEntry(ReportEntries, conversationId, {
         data: {jobId: job.id, deliveryId: delivery.id, occurrenceIds: [...delivery.occurrenceIds]},
         model: [reportMessage(text, timestamp)],
@@ -228,7 +241,14 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
   ): Promise<void> {
     await runtime.commit(async tx => {
       const draft = await tx.doc(Deliveries, delivery.id, delivery);
-      if (draft.status === 'intent') applyDelivery(draft, failDelivery(delivery, error, runtime.now()));
+      if (draft.status === 'intent') {
+        const failed = failDelivery(delivery, error, runtime.now());
+        applyDelivery(draft, failed);
+        await appendEvent(tx, {
+          type: 'delivery.failed', aggregate: 'delivery', aggregateId: delivery.id,
+          revision: delivery.revision, at: failed.updatedAt, data: {channel: 'notification', error},
+        });
+      }
       return notifyTerminal(delivery.id, 'failed');
     }, BACKGROUND_CONTEXT);
   }
@@ -266,19 +286,34 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
       const draft = await tx.doc(Deliveries, delivery.id, delivery);
       if (draft.status === 'attempting') {
         if (draft.workerId === workerId) {
-          applyDelivery(draft, recoverInterruptedDeliveryAttempt(draft, {now, reason: 'interrupted'}));
+          const recovered = recoverInterruptedDeliveryAttempt(draft, {now, reason: 'interrupted'});
+          applyDelivery(draft, recovered);
+          await appendEvent(tx, {
+            type: 'delivery.unknown', aggregate: 'delivery', aggregateId: delivery.id,
+            revision: delivery.revision, at: now, data: {channel: 'notification', error: 'interrupted'},
+          });
           phase.value = 'terminal';
           return notifyTerminal(delivery.id, 'unknown');
         }
         // An attempting record without a proven worker/token/deadline cannot be attributed to a live
         // worker; it is treated as an interrupted legacy attempt, never replayed.
         if (draft.attemptToken === null || draft.workerId === null || draft.deadline === null) {
-          applyDelivery(draft, recoverInterruptedDeliveryAttempt(draft, {now, reason: 'interrupted'}));
+          const recovered = recoverInterruptedDeliveryAttempt(draft, {now, reason: 'interrupted'});
+          applyDelivery(draft, recovered);
+          await appendEvent(tx, {
+            type: 'delivery.unknown', aggregate: 'delivery', aggregateId: delivery.id,
+            revision: delivery.revision, at: now, data: {channel: 'notification', error: 'interrupted'},
+          });
           phase.value = 'terminal';
           return notifyTerminal(delivery.id, 'unknown');
         }
         if (deliveryAttemptState(draft, now) === 'expired') {
-          applyDelivery(draft, recoverExpiredDeliveryAttempt(draft, {now, reason: 'attempt-deadline-expired'}));
+          const recovered = recoverExpiredDeliveryAttempt(draft, {now, reason: 'attempt-deadline-expired'});
+          applyDelivery(draft, recovered);
+          await appendEvent(tx, {
+            type: 'delivery.unknown', aggregate: 'delivery', aggregateId: delivery.id,
+            revision: delivery.revision, at: now, data: {channel: 'notification', error: 'attempt-deadline-expired'},
+          });
           phase.value = 'terminal';
           return notifyTerminal(delivery.id, 'unknown');
         }
@@ -328,11 +363,22 @@ export function deliveryRuntime(options: DeliveryRuntimeOptions): DeliveryRuntim
       const deadlineAt = draft.deadline ?? deadline;
       if (now >= deadlineAt) {
         // A late outcome after the deadline is never turned into success.
-        applyDelivery(draft, recoverExpiredDeliveryAttempt(draft, {now, reason: 'attempt-deadline-expired'}));
+        const recovered = recoverExpiredDeliveryAttempt(draft, {now, reason: 'attempt-deadline-expired'});
+        applyDelivery(draft, recovered);
+        await appendEvent(tx, {
+          type: 'delivery.unknown', aggregate: 'delivery', aggregateId: delivery.id,
+          revision: delivery.revision, at: now, data: {channel: 'notification', error: 'attempt-deadline-expired'},
+        });
         return notifyTerminal(delivery.id, 'unknown');
       }
       const settled = settleDeliveryAttempt(draft, settlement, {token: attemptToken, now});
       applyDelivery(draft, settled);
+      await appendEvent(tx, {
+        type: settled.status === 'done' ? 'delivery.done'
+          : settled.status === 'failed' ? 'delivery.failed' : 'delivery.unknown',
+        aggregate: 'delivery', aggregateId: delivery.id, revision: delivery.revision, at: now,
+        data: {channel: 'notification', error: settled.status === 'done' ? null : settled.error},
+      });
       return notifyTerminal(delivery.id, terminalStatus(settled.status));
     }, BACKGROUND_CONTEXT);
   }

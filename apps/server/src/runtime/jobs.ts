@@ -10,6 +10,9 @@ import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
 import type { JobArtifactView, JobCommands, JobStore } from '../application/job.js';
 import { jobCommands } from '../application/job.js';
 import { Chats } from '../storage/chats.js';
+import type { ProductEventType } from './events.js';
+import { appendEvent } from './events.js';
+import { indexReceipt, writeJobIndex } from './state-index.js';
 import { Attempts, JobCommandReceipts, JobExecutions, Jobs } from '../storage/job.js';
 import {
   assertExpectedRevision, attemptDisposition, attemptIdFor, canAmendJob, canCancelJob,
@@ -58,6 +61,31 @@ function failed(message: string): NextTaskState<AttemptCheckpoint, AttemptResult
 
 function fingerprint(command: object): string {
   return createHash('sha256').update(JSON.stringify(command)).digest('hex');
+}
+
+/** Persist the v2 job index and (optionally) one product event in the caller's transaction. */
+async function recordJob(
+  tx: Tx, job: Readonly<Job>, type?: ProductEventType,
+  data?: Readonly<Record<string, string | number | boolean | null>>,
+): Promise<void> {
+  await writeJobIndex(tx, job);
+  if (type !== undefined) {
+    await appendEvent(tx, {
+      type, aggregate: 'job', aggregateId: job.id, revision: job.revision, at: job.updatedAt,
+      ...(data === undefined ? {} : {data}),
+    });
+  }
+}
+
+/** Append one attempt lifecycle event (attempts have no index of their own; the Job index is canonical). */
+async function recordAttempt(
+  tx: Tx, attempt: Readonly<Attempt>, type: ProductEventType,
+): Promise<void> {
+  await appendEvent(tx, {
+    type, aggregate: 'attempt', aggregateId: attempt.id, revision: attempt.revision,
+    at: attempt.endedAt ?? attempt.startedAt,
+    data: {jobId: attempt.jobId, status: attempt.status},
+  });
 }
 
 function copyJob(job: Readonly<Job>): Job {
@@ -113,6 +141,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
               draft.status = 'cancelled';
               draft.endedAt = now;
               draft.error = TERMINAL_REASON.cancelled;
+              await recordAttempt(tx, draft, 'attempt.cancelled');
             }
             return aborted(TERMINAL_REASON.cancelled);
           }
@@ -121,13 +150,18 @@ export function jobRuntime(options: JobRuntimeOptions) {
               draft.status = 'superseded';
               draft.endedAt = now;
               draft.error = TERMINAL_REASON.superseded;
+              await recordAttempt(tx, draft, 'attempt.superseded');
             }
             return aborted(TERMINAL_REASON.superseded);
           }
           if (draft.status !== 'queued' && draft.status !== 'running') return aborted('stale-attempt');
           if (draftJob.status === 'queued' && canTransitionJob('queued', 'running')) draftJob.status = 'running';
           draftJob.updatedAt = now;
-          if (draft.status === 'queued') draft.status = 'running';
+          if (draft.status === 'queued') {
+            draft.status = 'running';
+            await recordAttempt(tx, draft, 'attempt.started');
+          }
+          await recordJob(tx, draftJob, draftJob.status === 'running' ? 'job.running' : undefined);
           return {status: 'running', checkpoint: {phase: 'run'}};
         }, ctx);
       },
@@ -200,6 +234,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
               currentAttempt.status = 'cancelled';
               currentAttempt.endedAt = now;
               currentAttempt.error = TERMINAL_REASON.cancelled;
+              await recordAttempt(tx, currentAttempt, 'attempt.cancelled');
             }
             return aborted(TERMINAL_REASON.cancelled);
           }
@@ -208,6 +243,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
               currentAttempt.status = 'superseded';
               currentAttempt.endedAt = now;
               currentAttempt.error = TERMINAL_REASON.superseded;
+              await recordAttempt(tx, currentAttempt, 'attempt.superseded');
             }
             return aborted(TERMINAL_REASON.superseded);
           }
@@ -223,6 +259,8 @@ export function jobRuntime(options: JobRuntimeOptions) {
             currentJob.status = 'failed';
             currentJob.error = 'ARTIFACT_REQUIRED';
             currentJob.updatedAt = now;
+            if (currentAttempt.status === 'failed') await recordAttempt(tx, currentAttempt, 'attempt.failed');
+            await recordJob(tx, currentJob, 'job.failed', {error: 'ARTIFACT_REQUIRED'});
             return completed({jobId, attemptId, status: 'failed'});
           }
           if (!canTransitionAttempt(currentAttempt.status, 'completed')) return aborted('stale-attempt');
@@ -236,6 +274,8 @@ export function jobRuntime(options: JobRuntimeOptions) {
           currentJob.artifactId = artifactId as string;
           currentJob.error = null;
           currentJob.updatedAt = now;
+          await recordAttempt(tx, currentAttempt, 'attempt.completed');
+          await recordJob(tx, currentJob, 'job.ready');
           return completed({jobId, attemptId, status: 'ready'});
         }, ctx);
       },
@@ -250,6 +290,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
           draft.status = 'cancelled';
           draft.endedAt = runtime.now();
           draft.error = TERMINAL_REASON.cancelled;
+          await recordAttempt(tx, draft, 'attempt.cancelled');
         }
         return aborted(TERMINAL_REASON.cancelled);
       }, ctx);
@@ -270,6 +311,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
         draft.status = state;
         draft.endedAt = now;
         draft.error = TERMINAL_REASON[state];
+        await recordAttempt(tx, draft, state === 'cancelled' ? 'attempt.cancelled' : 'attempt.superseded');
       }
       return aborted(TERMINAL_REASON[state]);
     }, ctx);
@@ -290,6 +332,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
           currentAttempt.status = 'cancelled';
           currentAttempt.endedAt = now;
           currentAttempt.error = TERMINAL_REASON.cancelled;
+          await recordAttempt(tx, currentAttempt, 'attempt.cancelled');
         }
         return aborted(TERMINAL_REASON.cancelled);
       }
@@ -298,6 +341,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
           currentAttempt.status = 'superseded';
           currentAttempt.endedAt = now;
           currentAttempt.error = TERMINAL_REASON.superseded;
+          await recordAttempt(tx, currentAttempt, 'attempt.superseded');
         }
         return aborted(TERMINAL_REASON.superseded);
       }
@@ -305,11 +349,13 @@ export function jobRuntime(options: JobRuntimeOptions) {
         currentAttempt.status = 'failed';
         currentAttempt.error = code;
         currentAttempt.endedAt = now;
+        await recordAttempt(tx, currentAttempt, 'attempt.failed');
       }
       if (currentJob.status !== 'cancelled') {
         currentJob.status = 'failed';
         currentJob.error = code;
         currentJob.updatedAt = now;
+        await recordJob(tx, currentJob, 'job.failed', {error: code});
       }
       return completed({jobId, attemptId, status: 'failed'});
     }, ctx);
@@ -363,6 +409,11 @@ export function jobRuntime(options: JobRuntimeOptions) {
         };
         await tx.doc(Jobs, jobId, copyJob(job));
         await tx.doc(Attempts, attemptId, copyAttempt(attempt));
+        await recordJob(tx, job, 'job.started');
+        await indexReceipt(tx, {
+          family: 'point.command.job', receiptKey: `start:${command.sourceChatId}:${command.requestId}`,
+          referencedId: jobId, terminal: false, createdAt: now,
+        });
         const result: StartJobResult = {jobId, revision, attemptId};
         receipt.result = result;
         return {...result};
@@ -397,6 +448,7 @@ export function jobRuntime(options: JobRuntimeOptions) {
             stale.status = 'superseded';
             stale.endedAt = now;
             stale.error = TERMINAL_REASON.superseded;
+            await recordAttempt(tx, stale, 'attempt.superseded');
           }
           if (stale.taskId) oldTaskId = Number(stale.taskId);
         }
@@ -417,6 +469,11 @@ export function jobRuntime(options: JobRuntimeOptions) {
           startedAt: now, endedAt: null,
         };
         await tx.doc(Attempts, attemptId, copyAttempt(attempt));
+        await recordJob(tx, job, 'job.amended');
+        await indexReceipt(tx, {
+          family: 'point.command.job', receiptKey: `amend:${command.jobId}:${command.requestId}`,
+          referencedId: job.id, terminal: false, createdAt: now,
+        });
         const result: AmendJobResult = {jobId: job.id, revision, attemptId};
         receipt.result = result;
         return {...result};
@@ -457,9 +514,15 @@ export function jobRuntime(options: JobRuntimeOptions) {
             attempt.status = 'cancelled';
             attempt.endedAt = now;
             attempt.error = TERMINAL_REASON.cancelled;
+            await recordAttempt(tx, attempt, 'attempt.cancelled');
           }
           if (attempt.taskId) taskId = Number(attempt.taskId);
         }
+        await recordJob(tx, job, 'job.cancelled');
+        await indexReceipt(tx, {
+          family: 'point.command.job', receiptKey: `cancel:${command.jobId}:${command.requestId}`,
+          referencedId: job.id, terminal: true, createdAt: now,
+        });
         const result: CancelJobResult = {jobId: job.id, status: 'cancelled'};
         receipt.result = result;
         return {...result};

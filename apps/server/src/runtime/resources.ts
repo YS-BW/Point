@@ -12,6 +12,8 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Harness } from '@earendil-works/pi-durable';
 import type { ResourceStore } from '../application/resource.js';
 import { ResourceError, type ResourceOperation } from '../domain/resource.js';
+import { appendEvent } from './events.js';
+import { indexReceipt, writeResourceIndex } from './state-index.js';
 import {
   ABSENT_COMMAND, ABSENT_OPERATION, ABSENT_OPERATION_REQUEST, ABSENT_RESOURCE,
   ResourceCommandReceipts, ResourceOperationRequests, ResourceOperations, Resources,
@@ -134,6 +136,11 @@ export function durableResourceStore(harness: ResourceHarness): ResourceStore {
         if (resourceWrite !== undefined && resourceDraft !== undefined) {
           resourceDraft.present = true;
           resourceDraft.value = resourceDocument(resourceWrite.value);
+          await writeResourceIndex(tx, resourceDraft.value);
+          await appendEvent(tx, {
+            type: 'resource.updated', aggregate: 'resource', aggregateId: resourceId,
+            revision: resourceWrite.value.revision, data: {state: resourceWrite.value.state},
+          });
         }
         if (operationWrite !== undefined && operationDraft !== undefined && requestDraft !== undefined) {
           operationDraft.present = true;
@@ -142,11 +149,22 @@ export function durableResourceStore(harness: ResourceHarness): ResourceStore {
           // operation itself, so a crash can never expose the operation without its index.
           requestDraft.present = true;
           requestDraft.operationId = operationWrite.value.id;
+          await appendEvent(tx, {
+            type: 'resource.operation.settled', aggregate: 'operation',
+            aggregateId: operationWrite.value.id, revision: operationWrite.value.revision,
+            data: {resourceId, state: operationWrite.value.state},
+          });
         }
         if (receiptDocument !== undefined && receiptDraft !== undefined && !receiptDraft.present) {
           receiptDraft.present = true;
           receiptDraft.fingerprint = receiptDocument.fingerprint;
           receiptDraft.result = receiptDocument.result;
+        }
+        if (receiptWrite !== undefined && receiptKey !== undefined) {
+          await indexReceipt(tx, {
+            family: 'point.resource-command', receiptKey,
+            referencedId: resourceId, terminal: false,
+          });
         }
       }, BACKGROUND_CONTEXT);
     },
