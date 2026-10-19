@@ -7,13 +7,18 @@
  * prove terminal is kept and reported with a reason; the operation is fail-closed.
  */
 
-import type { Harness, TaskId } from '@earendil-works/pi-durable';
+import type { Harness, TaskId, Tx } from '@earendil-works/pi-durable';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { Attempts, JobCommandReceipts, Jobs } from '../storage/job.js';
+import type { Job } from '../domain/job.js';
+import type { Attempt } from '../domain/job.js';
 import { CreateChatReceipts } from '../storage/chats.js';
 import { ProfileReceipts } from '../storage/profile.js';
 import { FollowupCommandReceipts, Schedules } from '../storage/schedule.js';
-import { ResourceCommandReceipts, ResourceOperations } from '../storage/resource.js';
+import type { Schedule } from '../domain/schedule.js';
+import {
+  ABSENT_OPERATION, ResourceCommandReceipts, ResourceOperations,
+} from '../storage/resource.js';
 import { CommandReceipts, CompactReceipts } from '../storage/conversation.js';
 import { Events, RequestsIndex, type RequestIndexEntry } from '../storage/state.js';
 import { appendEvent, type ProductEventType } from './events.js';
@@ -232,9 +237,145 @@ export async function rebuildEventTimeline(
   return {removed: options.replace === false ? 0 : existing.length, appended: append.length};
 }
 
-/** Bounded request-ledger cleanup helper; exported below as `cleanupReceipts`. */
+
+type Candidate = {
+  entry: RequestIndexEntry;
+  receipt: ReceiptValue;
+  job?: ReceiptValue;
+  attempt?: ReceiptValue;
+  schedule?: ReceiptValue;
+  operation?: ReceiptValue;
+};
+
+function resultOf(receipt: ReceiptValue): ReceiptValue | undefined {
+  const value = receipt.result;
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as ReceiptValue : undefined;
+}
+
+function resourceIdFromReceiptKey(receiptKey: string): string | undefined {
+  // Key shape: `<resourceId.length>:<resourceId>/<requestId.length>:<requestId>`.
+  const colon = receiptKey.indexOf(':');
+  if (colon < 0) return undefined;
+  const length = Number(receiptKey.slice(0, colon));
+  if (!Number.isSafeInteger(length) || length < 1) return undefined;
+  const resourceId = receiptKey.slice(colon + 1, colon + 1 + length);
+  return resourceId === '' ? undefined : resourceId;
+}
+
+/** Pre-load the receipt and every entity its protection decision depends on (outside the commit). */
+async function preloadCandidate(
+  entry: Readonly<RequestIndexEntry>, harness: Harness, unresolved: ReadonlySet<string>,
+): Promise<{candidate?: Candidate; reason?: string}> {
+  if (!isReceiptFamily(entry.family)) return {reason: 'unindexed'};
+  const receipt = await loadReceipt(entry.family, entry.receiptKey, harness);
+  if (receipt === undefined) return {reason: 'missingReceipt'};
+  const candidate: Candidate = {entry, receipt};
+  if (entry.family === 'point.command.chat-create' || entry.family === 'point.command.profile') {
+    return {candidate};
+  }
+  if (entry.family === 'point.conversation.command' || entry.family === 'point.command.compact') {
+    if (typeof receipt.taskId !== 'number' || !Number.isSafeInteger(receipt.taskId) || receipt.taskId <= 0) {
+      return {reason: 'referenced'};
+    }
+    return {candidate};
+  }
+  if (entry.family === 'point.command.job') {
+    const jobId = resultOf(receipt)?.jobId;
+    if (typeof jobId !== 'string') return {reason: 'referenced'};
+    const job = await harness.snapshot(Jobs, jobId, context);
+    if (job === undefined) return {reason: 'referenced'};
+    candidate.job = job as unknown as ReceiptValue;
+    if (typeof job.currentAttemptId === 'string') {
+      const attempt = await harness.snapshot(Attempts, job.currentAttemptId, context);
+      if (attempt !== undefined) candidate.attempt = attempt as unknown as ReceiptValue;
+    }
+    return {candidate};
+  }
+  if (entry.family === 'point.command.followup') {
+    const scheduleId = resultOf(receipt)?.scheduleId;
+    if (typeof scheduleId !== 'string') return {reason: 'referenced'};
+    const schedule = await harness.snapshot(Schedules, scheduleId, context);
+    if (schedule !== undefined) candidate.schedule = schedule as unknown as ReceiptValue;
+    return {candidate};
+  }
+  // point.resource-command
+  const resourceId = resourceIdFromReceiptKey(entry.receiptKey);
+  if (resourceId === undefined) return {reason: 'referenced'};
+  const operationId = resultOf(receipt)?.id;
+  if (typeof operationId === 'string') {
+    const operation = await harness.snapshot(ResourceOperations, operationId, context);
+    if (operation !== undefined) candidate.operation = operation as unknown as ReceiptValue;
+  }
+  if (candidate.operation !== undefined) {
+    const state = (candidate.operation.value as {state?: unknown} | null | undefined)?.state;
+    if (state === 'attempting') return {reason: 'attempting'};
+    if (state === 'unknown') return {reason: 'unknown'};
+  }
+  if (unresolved.has(resourceId)) return {reason: 'unknown'};
+  return {candidate};
+}
+
+/** Protection review against the live committed state, called inside the deleting commit. */
+async function protectionInTx(tx: Tx, candidate: Readonly<Candidate>): Promise<string | undefined> {
+  const {entry} = candidate;
+  if (entry.family === 'point.command.chat-create' || entry.family === 'point.command.profile') return undefined;
+  if (entry.family === 'point.conversation.command' || entry.family === 'point.command.compact') {
+    const taskId = candidate.receipt.taskId;
+    if (typeof taskId !== 'number' || !Number.isSafeInteger(taskId) || taskId <= 0) return 'referenced';
+    const task = await tx.task(taskId as TaskId);
+    return task === undefined || task.state.status === 'terminal' ? undefined : 'attempting';
+  }
+  if (entry.family === 'point.command.job') {
+    if (candidate.job === undefined) return 'referenced';
+    const job = await tx.doc(Jobs, String(candidate.job.id), candidate.job as unknown as Job);
+    if (job.status === 'queued' || job.status === 'running') return 'active';
+    if (job.currentAttemptId === null) return undefined;
+    const attemptSeed = candidate.attempt as unknown as Attempt | undefined;
+    const attempt = await tx.doc(Attempts, job.currentAttemptId, attemptSeed ?? ({} as Attempt));
+    return attempt.status === 'queued' || attempt.status === 'running' ? 'attempting' : undefined;
+  }
+  if (entry.family === 'point.command.followup') {
+    const scheduleId = resultOf(candidate.receipt)?.scheduleId;
+    if (typeof scheduleId !== 'string') return 'referenced';
+    if (candidate.schedule === undefined) return undefined;
+    const schedule = await tx.doc(Schedules, scheduleId, candidate.schedule as unknown as Schedule);
+    return schedule.status === 'active' ? 'active' : undefined;
+  }
+  if (entry.family === 'point.resource-command') {
+    const resourceId = resourceIdFromReceiptKey(entry.receiptKey);
+    if (resourceId === undefined) return 'referenced';
+    const operationId = resultOf(candidate.receipt)?.id;
+    if (typeof operationId === 'string') {
+      const operation = await tx.doc(ResourceOperations, operationId, ABSENT_OPERATION);
+      const state = operation.value?.state;
+      if (state === 'attempting') return 'attempting';
+      if (state === 'unknown') return 'unknown';
+    }
+    return undefined;
+  }
+  return 'unindexed';
+}
+
+let cleanupChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Bounded request-ledger cleanup. Candidates are discovered outside the commit, but every reference is
+ * re-validated against the committed state inside the deleting transaction, so a concurrent state change
+ * can never remove a currently referenced receipt. Cleanup runs are serialized in-process (the server is a
+ * single writer); cross-process concurrency is prevented by the directory owner lock.
+ */
 export async function cleanupReceipts(
   deps: ReceiptCleanupDeps, options: ReceiptCleanupOptions = {},
+): Promise<ReceiptCleanupResult> {
+  const run = async (): Promise<ReceiptCleanupResult> => cleanupOnce(deps, options);
+  const next = cleanupChain.then(run, run);
+  cleanupChain = next.catch(() => undefined);
+  return next;
+}
+
+async function cleanupOnce(
+  deps: ReceiptCleanupDeps, options: ReceiptCleanupOptions,
 ): Promise<ReceiptCleanupResult> {
   const now = options.now ?? deps.now ?? Date.now;
   const keepMs = options.keepMs ?? DEFAULT_RECEIPT_KEEP_MS;
@@ -257,42 +398,52 @@ export async function cleanupReceipts(
   }
   entries.sort(compareOldest);
   const unresolved = await unresolvedResourceIds(deps.scan);
-
   const protectNewest = keepCount > 0
     ? new Set(entries.slice(-keepCount).map(pageKey))
     : new Set<string>();
-  const removals: RequestIndexEntry[] = [];
+
+  const candidates: Candidate[] = [];
   let kept = 0;
   for (const entry of entries) {
-    const key = pageKey(entry);
-    if (protectNewest.has(key)) { bump('protectedNewest'); kept += 1; continue; }
+    if (protectNewest.has(entry.key)) { bump('protectedNewest'); kept += 1; continue; }
     if (timestamp - entry.createdAt <= keepMs) { bump('young'); kept += 1; continue; }
-    let reason: string | undefined;
+    if (candidates.length >= MAX_RECEIPTS_PER_CLEANUP) { bump('limit'); kept += 1; continue; }
+    let loaded;
     try {
-      reason = await protectedReason(entry, harness, unresolved);
+      loaded = await preloadCandidate(entry, harness, unresolved);
     } catch {
-      reason = 'error';
+      bump('error'); kept += 1; continue;
     }
-    if (reason !== undefined) { bump(reason); kept += 1; continue; }
-    if (removals.length >= MAX_RECEIPTS_PER_CLEANUP) { bump('limit'); kept += 1; continue; }
-    removals.push(entry);
+    if (loaded.candidate === undefined) { bump(loaded.reason ?? 'error'); kept += 1; continue; }
+    candidates.push(loaded.candidate);
   }
 
-  const removedKeys = removals.map(pageKey);
-  if (!options.dryRun && removals.length > 0) {
+  if (options.dryRun) {
+    return {
+      scanned: entries.length, removed: 0, kept: kept + candidates.length, dryRun: true, reasons,
+      removedKeys: candidates.map(candidate => candidate.entry.key),
+    };
+  }
+
+  const removedKeys: string[] = [];
+  if (candidates.length > 0) {
     await harness.commit(async tx => {
-      for (const entry of removals) {
-        await retireReceipt(tx, entry.family, entry.receiptKey);
-        await tx.retireDoc(RequestsIndex, entry.key);
+      for (const candidate of candidates) {
+        let reason: string | undefined;
+        try {
+          reason = await protectionInTx(tx, candidate);
+        } catch {
+          reason = 'error';
+        }
+        if (reason !== undefined) { bump(reason); kept += 1; continue; }
+        await retireReceipt(tx, candidate.entry.family, candidate.entry.receiptKey);
+        await tx.retireDoc(RequestsIndex, candidate.entry.key);
+        removedKeys.push(candidate.entry.key);
       }
     }, context);
   }
   return {
-    scanned: entries.length,
-    removed: options.dryRun ? 0 : removals.length,
-    kept,
-    dryRun: options.dryRun === true,
-    reasons,
-    removedKeys,
+    scanned: entries.length, removed: removedKeys.length, kept: kept + candidates.length - removedKeys.length,
+    dryRun: false, reasons, removedKeys,
   };
 }

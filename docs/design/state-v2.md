@@ -16,7 +16,7 @@
 | 有 SDK 记录但无产品 meta | 拒绝（`UNRECOGNIZED_DATA`） | 拒绝 | 拒绝 |
 
 - 版本检测在 SDK storage preflight 之后、任何产品写之前，通过 `harness.snapshot()` 读取，不使用裸 SQL。
-- 只读模式：仍取 `owner.sqlite` 单写者锁，不 `resume`，产品 store 的 `commit`/`resume` 统一抛 `READ_ONLY`。**这是产品层保证**：SDK 没有公开的 read-only storage，SQLite/WAL 仍可能产生文件级写入，不构成 OS 级只读。
+- 只读模式：仍取 `owner.sqlite` 单写者锁，不 `resume`，产品 store 的 `commit`/`resume` 统一抛 `READ_ONLY`（`cleanupReceipts` 也直接拒绝）。**这是产品层保证**：SDK 没有公开的 read-only storage，SQLite/WAL 仍可能产生文件级写入，不构成 OS 级只读。
 - 只读模式下迁移命令一律拒绝；恢复 pre-v2 快照后先只读核对，再显式迁移。
 
 ## 2. v2 文档族
@@ -31,6 +31,7 @@
 | job entity | `point.job` | 2 | jobId；形状不变（identity migrate） |
 | jobs index | `point.jobs` | 1 | jobId → `{id,revision,status,updatedAt}` |
 | memory | `point.memory` | 1 | profile key → `{key,value,kind,sourceChatId,revision,updatedAt}`；替代单文档 `point.profile`（迁移复制后 retire，收据保留） |
+| memory counter | `point.memory-count` | 1 | 派生计数 singleton（key `default`）：profile 64 条上限在写事务内据此 CAS 判定，避免 commit 前读计数导致的并发越界；迁移按条目数回填，缺失时首次写以扫描数 seed |
 | resource index | `point.resources` | 1 | resourceId → `{id,owner,state,controlEpoch,revision,leaseExpiresAt,updatedAt}`；roadmap 的 `browser` 分片以 capability-generic 的 `point.resources` 落法实现 |
 | requests index | `point.requests` | 1 | `${family}:${receiptKey}` → `{key,family,receiptKey,referencedId,terminal,createdAt}` |
 | event | `point.event` | 1 | eventId → `{id,type,aggregate,aggregateId,revision,at,data?}` |
@@ -68,9 +69,14 @@
 - 只通过 `point.requests` 发现收据，再按家族读取真实收据文档。
 - 永久保护：`attempting` / 未核销 `unknown` 的资源 operation；active job（queued/running 或 attempting attempt）；active schedule；无法解析引用/读取收据（fail-closed）；unknown 家族。
 - 最近 `keepCount` 条永远保留；未过 `keepMs` 的保留；`dryRun` 只报告不提交。
+- 保护判定在**删除 commit 内**对已提交状态重新校验；cleanup 在进程内串行化（单写者锁阻止跨进程并发）。
 - 清扫只 retire 收据文档与索引项，不改产品状态。
 
 ## 6. 已知限制 / 未验证
+
+- `rebuildEventTimeline()` 当前只从 chat/job/memory/resource/artifact/schedule 重建当前状态快照；attempt/delivery/resource-operation 的完整时间线与历史顺序不重建（已知限制，后续读模型/事件 WP 补全）。
+- 清扫按保留窗口删除终态收据后，极老的同 requestId 重放会被当作新命令（收据账本本身有保留策略，不承诺永久幂等）。
+- `point.memory-count` 是派生计数：直接改写 `point.memory` 文档的外部工具需同步修正计数（正常写入路径不会）。
 
 - SDK 无公开 read-only storage：只读模式是产品层 commit guard，SQLite/WAL 仍可能写文件。
 - 备份目录/磁盘保留策略由运维配置；不自动清理旧备份。

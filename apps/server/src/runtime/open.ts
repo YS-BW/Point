@@ -29,7 +29,7 @@ import {
 import { deliveryRuntime } from './deliveries.js';
 import { followupRuntime, type SessionDocumentScanner } from './schedules.js';
 import { durableResourceStore } from './resources.js';
-import { detectStateFormat, readOnlyGuard, type OpenMode } from './format.js';
+import { StateFormatError, detectStateFormat, readOnlyGuard, type OpenMode } from './format.js';
 import {
   cleanupReceipts, rebuildEventTimeline,
   type EventRebuildResult, type ReceiptCleanupOptions, type ReceiptCleanupResult,
@@ -200,7 +200,9 @@ export async function openRuntime(
       deliveries: deliveries.commands,
       resources,
       readOnly: mode === 'read-only',
-      cleanupReceipts: options => cleanupReceipts({getHarness: current, scan}, options),
+      cleanupReceipts: options => mode === 'read-only'
+        ? Promise.reject(new StateFormatError('READ_ONLY'))
+        : cleanupReceipts({getHarness: current, scan}, options),
       rebuildEvents: () => rebuildEventTimeline({getHarness: current, scan}),
       closed: harness.closed.then(() => undefined), close() {
         return closing ??= harness!.close(BACKGROUND_CONTEXT).finally(release);

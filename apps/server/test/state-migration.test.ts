@@ -312,6 +312,20 @@ test('SIGKILL before and after the migration commit is safely re-runnable', {tim
   }
 });
 
+test('migration rejects a v2 metadata with a mismatched engine instead of already-migrated', {timeout: 20000}, async t => {
+  const dir = await directory(t);
+  const runtime = await openRuntime(dir);
+  await runtime.close();
+  await inspect(dir, async harness => {
+    await harness.commit(async tx => { (await tx.doc(MetaV2)).engine = 'pi-durable@0.0.0'; }, context);
+  });
+  await assert.rejects(migrateRuntime(dir),
+    (error: unknown) => error instanceof MigrationError && error.code === 'MIGRATION_INCOMPATIBLE');
+  await inspect(dir, async harness => {
+    assert.equal((await harness.snapshot(MetaV2, context))?.engine, 'pi-durable@0.0.0');
+  });
+});
+
 test('migration refuses an unknown/higher product format without writing', {timeout: 20000}, async t => {
   const dir = await directory(t);
   const runtime = await openRuntime(dir);

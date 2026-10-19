@@ -67,20 +67,22 @@ Verified against locked `@earendil-works/pi-durable@1.3.0` (public package paths
 
 ## v2 shape freeze (task 1.2)
 
-The v2 product format is additive: existing per-entity family kinds stay authoritative, and v2 adds the sharded read-side families frozen by the WP3 roadmap. Entity domain types are unchanged (domain freeze).
+The v2 product format is additive: existing per-entity family kinds stay authoritative (`point.chat`/`point.job` are bumped to version 2 with an identity migration; other entity families keep their current versions), and v2 adds the sharded read-side families frozen by the WP3 roadmap. Entity domain types are unchanged (domain freeze).
 
 | Family | Kind | Scope | Key / seed | Purpose |
 |---|---|---|---|---|
 | meta | `point.meta` (v1) | session singleton | `{format: 2, engine, instanceId, migratedAt}` | Only product-format authority. Replaces and retires `point.server.meta` in the migration commit. |
 | chats index | `point.chats` (v1) | session family | chatId | `{id, name, revision, createdAt, updatedAt}` |
-| chat entity | `point.chat` (unchanged v1) | session family | chatId | Existing entity; no shape change. |
+| chat entity | `point.chat` (v2) | session family | chatId | Version bumped to v2 with an identity `migrate`; the stored shape/domain `Chat` type are unchanged, so no semantic drift. |
 | memory | `point.memory` (v1) | session family | profile key | `{key, value, kind, sourceChatId, revision, updatedAt}`; replaces the single `point.profile` map (retired after data copy; receipts remain). |
-| job entity | `point.job` (unchanged v1) | session family | jobId | Existing entity; no shape change. |
+| job entity | `point.job` (v2) | session family | jobId | Version bumped to v2 with an identity `migrate`; the stored shape/domain `Job` type are unchanged, so no semantic drift. |
 | jobs index | `point.jobs` (v1) | session family | jobId | `{id, revision, status, updatedAt}` |
 | resource index | `point.resources` (v1) | session family | resourceId | `{id, owner, state, controlEpoch, revision, leaseExpiresAt, updatedAt}` over existing resources. The roadmap shard name `browser` is intentionally realized as `point.resources`: the WP2 resource model is capability-generic and the roadmap forbids a browser-only resource abstraction. |
 | requests index | `point.requests` (v1) | session family | `${family}:${receiptKey}` | `{key, family, receiptKey, referencedId, terminal, createdAt}` for bounded cleanup. |
 | event | `point.event` (v1) | session family | eventId | `{id, type, aggregate, aggregateId, revision, at, data?}`; appended in the state commit, rebuildable. |
 
 Rejection semantics: `point.meta.format === 2` opens read-write; legacy `point.server.meta.format === 1` requires explicit migration in read-write mode (`MIGRATION_REQUIRED`) and is allowed only under read-only mode; `format > 2`, unknown metadata, mismatched engine, both metadata kinds present, or legacy metadata with a non-1 format are refused (`UNSUPPORTED_DATA_FORMAT`/`UNRECOGNIZED_DATA`) without writing. A populated database with no product metadata is `UNRECOGNIZED_DATA`; a fresh one is created directly as format 2.
+
+Same-commit consistency decisions (audit remediation): the profile 64-entry cap and forget existence are decided inside the write transaction using the derived `point.memory-count` counter (a pre-commit scan only seeds a missing counter; a stampede of unique-key inserts cannot exceed the cap). `cleanupReceipts` re-validates every reference inside the deleting commit and serializes cleanup runs in-process. `migrateRuntime` validates `point.meta` with the same engine/instance/format rules as the writable open, so a mismatched engine is `MIGRATION_INCOMPATIBLE`, never `already-migrated`.
 
 Indexes, memory and events are derived facts: they are rebuilt by migration from entity documents, and events are explicitly non-authoritative (state stays correct if the timeline is dropped/rebuilt). Migration backfills every index entry, appends exactly one bounded `state.migrated` event (with a count summary; per-entity events would bloat large databases), and copies profile entries into `point.memory` before retiring `point.profile`, all in the same commit that creates `point.meta`.

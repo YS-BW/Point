@@ -30,7 +30,8 @@ import { acquireOwner } from '../storage/owner.js';
 import { preflightStorage } from '../storage/preflight.js';
 import { Meta } from '../storage/meta.js';
 import {
-  Memory, MetaV2, memoryDocument, type MemoryDocument, type StateMetaV2,
+  MEMORY_COUNTER_KEY, Memory, MemoryCounter, MetaV2, assertStateMetaV2, memoryDocument,
+  type StateMetaV2,
 } from '../storage/state.js';
 import { Chats, CreateChatReceipts, type ChatDocument } from '../storage/chats.js';
 import { Attempts, JobCommandReceipts, Jobs } from '../storage/job.js';
@@ -195,7 +196,13 @@ export async function migrateRuntime(dataDir: string, options: MigrationOptions 
     const currentMeta = await harness.snapshot(MetaV2, context) as StateMetaV2 | undefined;
     const legacyMeta = await harness.snapshot(Meta, context);
     if (currentMeta !== undefined) {
-      if (legacyMeta !== undefined || currentMeta.format !== 2) throw new MigrationError('MIGRATION_INCOMPATIBLE');
+      if (legacyMeta !== undefined) throw new MigrationError('MIGRATION_INCOMPATIBLE');
+      try {
+        // Same validation as the writable open gate: engine/instanceId/format must all match.
+        assertStateMetaV2(currentMeta);
+      } catch {
+        throw new MigrationError('MIGRATION_INCOMPATIBLE');
+      }
       return {status: 'already-migrated', instanceId: currentMeta.instanceId};
     }
     if (legacyMeta === undefined) {
@@ -286,6 +293,9 @@ export async function migrateRuntime(dataDir: string, options: MigrationOptions 
           }
         }
         await tx.retireDoc(Profile);
+        // Derived same-commit counter seeded from the migrated entries (v2 writes keep it authoritative).
+        const counter = await tx.doc(MemoryCounter, MEMORY_COUNTER_KEY, counts.memory);
+        counter.count = counts.memory;
 
         // Request-ledger backfill: discovery index for bounded cleanup. The cleanup command resolves
         // references from the receipt documents themselves, so migration only has to index keys.

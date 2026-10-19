@@ -10,8 +10,11 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import { openRuntime } from '../src/runtime/open.js';
 import { indexReceipt } from '../src/runtime/state-index.js';
 import { CreateChatReceipts } from '../src/storage/chats.js';
-import { JobCommandReceipts, Jobs } from '../src/storage/job.js';
+import { Attempts, JobCommandReceipts, Jobs } from '../src/storage/job.js';
 import type { Job } from '../src/domain/job.js';
+import type { Attempt } from '../src/domain/job.js';
+import { FollowupCommandReceipts, Schedules } from '../src/storage/schedule.js';
+import type { Schedule } from '../src/domain/schedule.js';
 import {
   ABSENT_COMMAND, ResourceCommandReceipts, ResourceOperations,
   resourceRequestKey,
@@ -156,5 +159,88 @@ test('the protected most-recent window and configurable retention keep receipts'
       const all = await runtime.cleanupReceipts({keepMs: 0, keepCount: 0, now: future});
       assert.equal(all.removed, 5);
     } finally { await runtime.close(); }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+
+test('cleanup protects active schedules and attempting attempts with explicit reasons', {timeout: 30000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'point-cleanup-reasons-'));
+  try {
+    const runtime = await openRuntime(dir);
+    await runtime.close();
+    await inspect(dir, async harness => {
+      await harness.commit(async tx => {
+        // Active schedule receipt -> reason `active`.
+        const schedule: Schedule = {
+          id: 'schedule-active', jobId: 'job-1', revision: 1, sourceChatId: '2', status: 'active',
+          occurrenceIds: [], createdAt: 1, updatedAt: 1,
+        };
+        await tx.doc(Schedules, schedule.id, schedule);
+        const followup = await tx.doc(FollowupCommandReceipts, 'schedule:2:req', 'fp');
+        followup.result = {scheduleId: schedule.id, status: 'active'};
+        await indexReceipt(tx, {
+          family: 'point.command.followup', receiptKey: 'schedule:2:req', referencedId: schedule.id,
+          terminal: false, createdAt: 0,
+        });
+
+        // Ready job with a live attempt -> receipt kept, reason `attempting`.
+        const job: Job = {
+          id: 'job-attempting', title: '重试中', prompt: 'p', requirements: [], revision: 1, status: 'ready',
+          sourceChatId: '2', executionChatId: '9', currentAttemptId: 'job-attempting-1',
+          result: null, artifactId: null, error: null, createdAt: 1, updatedAt: 2,
+        };
+        const attempt: Attempt = {
+          id: 'job-attempting-1', jobId: job.id, revision: 1, status: 'running', taskId: '5',
+          conversationId: '9', artifactId: null, result: null, error: null, startedAt: 1, endedAt: null,
+        };
+        await tx.doc(Jobs, job.id, job);
+        await tx.doc(Attempts, attempt.id, attempt);
+        const jobReceipt = await tx.doc(JobCommandReceipts, 'start:2:req-attempt', 'fp2');
+        jobReceipt.result = {jobId: job.id, revision: 1, attemptId: attempt.id};
+        await indexReceipt(tx, {
+          family: 'point.command.job', receiptKey: 'start:2:req-attempt', referencedId: job.id,
+          terminal: false, createdAt: 0,
+        });
+      }, context);
+    });
+    const cleanup = await openRuntime(dir);
+    try {
+      const result = await cleanup.cleanupReceipts({keepMs: 0, keepCount: 0, now: () => Date.now() + 1_000});
+      assert.equal(result.removed, 0);
+      assert.ok((result.reasons['active'] ?? 0) >= 1, JSON.stringify(result.reasons));
+      assert.ok((result.reasons['attempting'] ?? 0) >= 1, JSON.stringify(result.reasons));
+    } finally { await cleanup.close(); }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test('concurrent cleanups are serialized and never remove a referenced receipt', {timeout: 30000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'point-cleanup-concurrent-'));
+  try {
+    const runtime = await openRuntime(dir);
+    for (let index = 0; index < 6; index += 1) {
+      await runtime.chats.create({requestId: `race-chat-${index}`, name: `chat-${index}`});
+    }
+    try {
+      const future = () => Date.now() + 1_000;
+      const [first, second] = await Promise.all([
+        runtime.cleanupReceipts({keepMs: 0, keepCount: 0, now: future}),
+        runtime.cleanupReceipts({keepMs: 0, keepCount: 0, now: future}),
+      ]);
+      assert.equal(first.removed + second.removed, 6, JSON.stringify([first, second]));
+      assert.equal((await runtime.cleanupReceipts({keepMs: 0, keepCount: 0, now: future})).removed, 0);
+    } finally { await runtime.close(); }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test('a read-only runtime refuses receipt cleanup with READ_ONLY', {timeout: 30000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'point-cleanup-readonly-'));
+  try {
+    const writer = await openRuntime(dir);
+    await writer.chats.create({requestId: 'c1', name: 'ro'});
+    await writer.close();
+    const reader = await openRuntime(dir, undefined, {mode: 'read-only'});
+    try {
+      await assert.rejects(reader.cleanupReceipts({keepMs: 0, keepCount: 0}), /READ_ONLY/);
+    } finally { await reader.close(); }
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
