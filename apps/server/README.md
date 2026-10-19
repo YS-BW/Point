@@ -96,4 +96,16 @@ const job = await runtime.jobs.get(started.jobId);
 const attempts = await runtime.jobs.attempts(started.jobId);
 ```
 
-execution conversation 内模型可调用 `save_artifact({name, content})`：写入 `<dataDir>/workspace/jobs/<jobId>/<attemptId>/<sanitized artifactId>/<name>`，tmp + fsync + rename，记录 sha256/bytes；只有 sealed 且 `jobs.artifact(id)` 验证通过的产物才能让 Job ready。文件与 Durable 文档不是同一事务：`verify` 只能在读取时发现篡改/缺失/半成品，不能保证 ready 后文件持续完整。amend 会创建新 attempt，旧 attempt 结果只审计、不覆盖新 revision；cancel 传播到 attempt task，但不撤销已发生的外部写。真实外部工具、通知/计划/HTTP 尚未实现。契约与未验证项见 [Job/Attempt 与产物](../../docs/design/jobs-and-artifacts.md)。
+execution conversation 内模型可调用 `save_artifact({name, content})`：写入 `<dataDir>/workspace/jobs/<jobId>/<attemptId>/<sanitized artifactId>/<name>`，tmp + fsync + rename，记录 sha256/bytes；只有 sealed 且 `jobs.artifact(id)` 验证通过的产物才能让 Job ready。文件与 Durable 文档不是同一事务：`verify` 只能在读取时发现篡改/缺失/半成品，不能保证 ready 后文件持续完整。amend 会创建新 attempt，旧 attempt 结果只审计、不覆盖新 revision；cancel 传播到 attempt task，但不撤销已发生的外部写。真实外部工具与 HTTP 尚未实现。契约与未验证项见 [Job/Attempt 与产物](../../docs/design/jobs-and-artifacts.md)。
+
+## 计划、投递与通知（WP1b.4）
+
+`finalize` 前 `runtime.followups` 可为 ready Job 建单次提醒计划（绝对 UTC 时刻、可选 advanceAt，最多 2 轮），到期由 `point.job.followup` 判断并投递：
+
+```js
+const plan = await runtime.followups.schedule({requestId: 'f1', jobId: started.jobId, expectedRevision: 1, dueAt: Date.now() + 60_000});
+const schedule = await runtime.followups.get(plan.scheduleId);
+const deliveries = await runtime.followups.deliveries(started.jobId);
+```
+
+只有 `Job.status === 'ready'` 可计划；同一 `(jobId, revision)` 只能有一个 schedule（cancelled 可替换），重排需 amend 或先 cancel。判断记录 `point.decision`；会话投递在 source chat 追加一条 `point.report` assistant entry（不调用模型），外部通知经可注入 `NotificationPort`（本片仅有测试用 `memoryNotificationAdapter`，target 固定 `test`）。通知先记 intent 再调用，failed/unknown 不自动重放，且不改变 Job/chat。错过合并为一次判断/一次投递；取消不撤回已创建 delivery；报告不重新核对 artifact hash（以 `jobs.artifact()` verify 为准）。契约见 [计划与投递](../../docs/design/plan-and-delivery.md)。

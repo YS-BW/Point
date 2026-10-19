@@ -89,6 +89,36 @@
 
 完成边界：Job/Attempt 身份、工具与产物。**WP1b.3 完成不代表 WP1b/G1 完成**。未验证/未实现：真实模型质量、真实外部工具/浏览器、计划/判断/投递/通知（WP1b.4）、HTTP、Docker、旧库迁移；artifact 文件与 Durable 文档非同一事务，`verify` 只能在读取时发现篡改/缺失，不能在 ready 后持续保证；artifact 写后 doc 前/结果 commit 前的其余崩溃窗口、结果 commit 前窗口未单独 fixture；cancel 只 abort attempt task、不 abort execution conversation，取消后 in-flight 模型循环可能继续消耗调用但不会 ready（P5）；`ArtifactState.unknown` 本片未产生（P6）；无长跑/性能/多层并发压力。上述项不能由 127 项绿推为完整。
 
+## WP1b.4 计划/判断/投递/通知（2026-10-19）
+
+2026-10-19T02:28:22Z，根目录 `npm run check`、`npm run build` 与 `npm test` 通过：**162 项测试全部通过，0 fail / 0 skip**。构成：服务端既有 **117 项**（chats 7 + conversation-experience 11 + lifecycle 15 + resource 18 + resource-operations 23 + profile 6 + context-budget 4 + compaction 8 + job 16 + artifact 9）+ 本片新增 **35 项**（schedule 15 + delivery 9 + notification 11）+ `scripts/boundaries.test.mjs` **10 项**。targeted `node --test apps/server/dist/test/{schedule,delivery,notification}.test.js` 为 **35/35**。
+
+实现：`point.schedule`/`point.occurrence`/`point.decision`/`point.delivery`/`point.schedule-head`；`runtime.followups` 的 schedule/cancel/get/occurrences/decisions/deliveries；`point.job.followup` 绝对时刻等待、恢复重读、错过合并、最多 2 轮提醒、只对 ready Job、cancel/revision 竞态 skip；判断单 commit 写 Decision + occurrence + 2 条 Delivery intent + Report/Notify task；`point.job.report` 追加一条 `point.report` assistant entry（不调模型）且幂等；`point.job.notify` 先 attempting 再调用可注入 `NotificationPort`，failed/unknown 不自动重放；`memoryNotificationAdapter` 仅测试。独立 reviewer 审计关闭 B1（非 ready Job 被伪报完成）、P1（多 schedule 绕过上限）、T1–T3；P2–P6 已知限制写入契约。
+
+原型 `POINT_CRASH_ROUNDS=1 npm test`（**28 项，0 fail / 0 skip**）通过；OpenSpec `agent-plan-delivery` strict 通过。证据：[WP1b.4 完整验收输出](../../infra/pi-durable-validation/evidence/wp1b-4-plan-delivery-2026-10-19T02-28-22Z.json)。
+
+完成边界：单次计划、判断、会话投递与外部通知端口。未验证/未实现：真实通知渠道（target 固定 `test`）、周期/cron、时区/DST、真实模型报告（报告由文档拼接）、HTTP、Docker、旧库迁移；cancel schedule 不撤回判断 commit 已创建的 delivery；Report 不重新核对 artifact hash；同 (job,revision) 只能一个 schedule，重排需 amend/先 cancel；followup crash 仅覆盖 before-due 窗口；无长跑/性能/多进程压力。
+
+## G1 骨架就绪验收（2026-10-19）
+
+**G1 = WP1a + WP1b + WP2**。按本仓库闸门定义（[roadmap](roadmap.md#L83)）验收：**通过**（骨架就绪，不等于 G2+ 或完整产品）。
+
+| 闸门要求 | 证据 | 结果 |
+|---|---|---|
+| WP1a 架构与基础骨架 | WP1a 验收段 | 通过 |
+| WP1b 正式 Agent 核心逐片重建 | WP1b.1/2a/2b/3/4 各段 | 通过（边界见各段） |
+| WP2 资源接口 + 内存桩跑通租约/过期/unknown | WP2 段 + resource 41 项 | 通过 |
+| `domain` 与具体实现解耦 | `npm run check`（boundaries）+ `grep -rniE 'steel\|cdp\|puppeteer\|rtc' apps/server/src/domain apps/server/src/application` 为空 | 通过 |
+| 无第二事实库 | `grep -rn 'messages\s*=\s*\[' apps/server/src` 为空；Durable docs/entries/tasks | 通过 |
+| 独立测试与故障注入 | 162/162 根目录测试；SIGKILL fixtures（init/chat/conversation/job/artifact/followup） | 通过 |
+| 独立评审 | WP2、WP1b.2b、WP1b.3、WP1b.4 各评审报告均通过、无未解决 blocker | 通过 |
+| 原型回归 | `POINT_CRASH_ROUNDS=1 npm test` 28/28 | 通过 |
+| OpenSpec strict | WP1b.2a/2b、WP2、WP1b.3、WP1b.4 changes valid | 通过 |
+
+证据：[G1 完整验收输出](../../infra/pi-durable-validation/evidence/g1-foundation-2026-10-19T02-28-22Z.json)；分支 `wp/1b-plan-delivery`，G1 提交与 `gate-g1` tag 见仓库。
+
+**G1 明确不包含**：真实模型语义质量、真实浏览器/外部工具/通知渠道、HTTP/AG-UI（G2）、状态 v2 迁移（G3）、Docker/长跑（G4/G5）、多层并发与长期收据治理。WP2 真实资源 adapter/持久化仍按后续 WP；WP1b 各片未验证项不得被 162 项绿覆盖。
+
 ## 已被取代、不要引用的旧口径
 
 - `runtime/acceptance-summary.json` 写 `testsPassed 24/24`，是 2026-10-18T03:08Z 的旧口径（当时还没有后 4 项）。**不要引用。**

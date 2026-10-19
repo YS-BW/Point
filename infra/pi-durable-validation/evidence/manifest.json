@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T02-13-33.000000+00:00",
+  "generatedAt": "2026-10-19T02-28-22.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -140,6 +140,20 @@
       "bytes": 45196,
       "sha256": "86eef6706a11d2608190aaddbf7ebb23ddcab8101be6bed9cca547b6afad6cd8",
       "source": "WP1b.3 local acceptance commands (check/build/targeted/full/boundary/openspec/prototype)",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1b-4-plan-delivery-2026-10-19T02-28-22Z.json",
+      "bytes": 53363,
+      "sha256": "5659c47683c438e8bf57a687e783b860a8e39aab22d8c205b75592ba26932291",
+      "source": "WP1b.4 local acceptance commands",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "g1-foundation-2026-10-19T02-28-22Z.json",
+      "bytes": 52542,
+      "sha256": "1d12e33dced52738c0b38e0bc9cf6ab9f57c7380a69cd647e27fd0eeafe4aa2c",
+      "source": "G1 skeleton readiness gate outputs",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

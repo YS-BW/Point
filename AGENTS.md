@@ -14,7 +14,7 @@
 ## 当前阶段
 
 - `WP0 基线` 已完成（git、证据入库、备份、CI、凭据）。
-- **WP1a（架构与基础骨架）已落地**，验收见 verification-status；当前推进 **WP1b（正式 Agent 核心工程化重建）**，WP1b.1 对话命令、WP1b.2a 对话执行、WP1b.2b 上下文/Profile/受保护压缩、WP1b.3 Job/Attempt/工具/产物与 WP2 资源边界契约/内存桩已落地，下一片为 **WP1b.4（单次计划、判断、投递与通知端口）**。WP2 真实资源 adapter、Durable 持久化与组合根接入仍待后续 WP；完整产品能力仍在 `infra/pi-durable-validation/`；`apps/server/` 的产品能力按独立分片重建，不代表完整 WP1/G1 已完成。
+- **WP1a（架构与基础骨架）已落地**；**WP1b（正式 Agent 核心工程化重建）五个分片与 WP2 资源边界内存桩已完成，G1 骨架就绪验收通过**（2026-10-19，证据见 verification-status；G1 不等于完整产品）。下一阶段按 roadmap 推进 WP2 真实资源适配/持久化、WP3 状态 v2 迁移与 WP4 API（G2）。完整产品能力仍在 `infra/pi-durable-validation/`；`apps/server/` 的产品能力按独立分片重建。
 - **浏览器原生 RTC 集成暂缓**：只做 WP10 止血，不要加功能、不要接控制面。
 
 ## 命令
