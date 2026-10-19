@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T01-54-21.000000+00:00",
+  "generatedAt": "2026-10-19T02-13-33.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -133,6 +133,13 @@
       "bytes": 38739,
       "sha256": "bc7d1121fca74883040f690ba4ed2a8e5757fdd2c40be9ea4cbf28b374a5efde",
       "source": "WP1b.2b local acceptance commands (check/build/targeted/full/boundary/openspec/prototype)",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1b-3-jobs-artifacts-2026-10-19T02-13-33Z.json",
+      "bytes": 45196,
+      "sha256": "86eef6706a11d2608190aaddbf7ebb23ddcab8101be6bed9cca547b6afad6cd8",
+      "source": "WP1b.3 local acceptance commands (check/build/targeted/full/boundary/openspec/prototype)",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

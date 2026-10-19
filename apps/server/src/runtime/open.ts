@@ -17,12 +17,17 @@ import { guardedModels } from './model-guard.js';
 import { durableProfileStore } from './profile.js';
 import { conversationRuntime } from './conversation.js';
 import type { ConversationCommands } from '../application/conversation.js';
+import type { JobCommands } from '../application/job.js';
+import { artifactCommandsForHarness } from './artifacts.js';
+import { jobRuntime } from './jobs.js';
+import { jobToolsExtension, saveArtifactTool } from './tools.js';
 
 export type ModelBinding = {models: Models; model: ModelRef};
 export type Runtime = RuntimeHandle & {
   readonly chats: ChatCommands;
   readonly conversation: ConversationCommands;
   readonly profile: ProfileCommands;
+  readonly jobs: JobCommands;
 };
 export async function openRuntime(dataDir: string, binding?: ModelBinding): Promise<Runtime> {
   if (binding && !binding.models.getModel(binding.model.provider, binding.model.modelId)) throw new Error('MODEL_NOT_CONFIGURED');
@@ -51,6 +56,21 @@ export async function openRuntime(dataDir: string, binding?: ModelBinding): Prom
       compaction: {enabled: true, reserveTokens: 4096, keepRecentTokens: 8192, backgroundTokens: 0},
       followUpMode: 'one-at-a-time',
     }}, BACKGROUND_CONTEXT);
+    // Jobs/artifacts are wired only after the Harness exists: the artifact store and the job tools both need
+    // committed document access. Installing the two extensions before any resume keeps attempt tasks resolvable.
+    const workspace = join(dataDir, 'workspace');
+    const artifacts = artifactCommandsForHarness(harness, dataDir);
+    const jobTools = jobToolsExtension(workspace);
+    const saveArtifact = saveArtifactTool(workspace);
+    const jobs = jobRuntime({
+      getHarness: current,
+      model: binding?.model,
+      executionExtensions: [guard.extension, context, jobTools],
+      executionTools: [saveArtifact],
+      artifacts,
+    });
+    registry.install(jobTools);
+    registry.install(jobs.extension);
     let meta = await harness.snapshot(Meta, BACKGROUND_CONTEXT);
     if (!meta) {
       if (populated) throw new Error('UNRECOGNIZED_DATA');
@@ -69,6 +89,7 @@ export async function openRuntime(dataDir: string, binding?: ModelBinding): Prom
     let closing: Promise<void> | undefined;
     return {instanceId: meta.instanceId, chats: chatCommands(durableChatStore(activeHarness)),
       conversation: conversation.commands, profile: profileCommands(durableProfileStore(current)),
+      jobs: jobs.commands,
       closed: activeHarness.closed.then(() => undefined), close() {
         return closing ??= activeHarness.close(BACKGROUND_CONTEXT).finally(release);
       }};

@@ -85,3 +85,15 @@ const outcome = await runtime.conversation.compactWait(accepted.commandId); // {
 ```
 
 压缩只改变活动上下文，不删除原始历史；压缩模型调用与生成调用共用 intent-before-effect 保护，缺少 permit 时 fail-closed。手动压缩需显式模型绑定；自动阈值压缩与真实模型质量未验证。同会话并发手动压缩会 fail-closed，需串行重试。契约与未验证项见 [上下文预算](../../docs/design/context-budget.md)。
+
+## Job/Attempt、工具与产物（WP1b.3）
+
+`openRuntime` 返回 `jobs` 端口；Job 是用户看到的工作，Attempt 是一次执行尝试（start/amend/cancel/get/attempts/artifact）：
+
+```js
+const started = await runtime.jobs.start({requestId: 'j1', title: '写方案', prompt: '给我一份方案', sourceChatId: chat.id});
+const job = await runtime.jobs.get(started.jobId);
+const attempts = await runtime.jobs.attempts(started.jobId);
+```
+
+execution conversation 内模型可调用 `save_artifact({name, content})`：写入 `<dataDir>/workspace/jobs/<jobId>/<attemptId>/<sanitized artifactId>/<name>`，tmp + fsync + rename，记录 sha256/bytes；只有 sealed 且 `jobs.artifact(id)` 验证通过的产物才能让 Job ready。文件与 Durable 文档不是同一事务：`verify` 只能在读取时发现篡改/缺失/半成品，不能保证 ready 后文件持续完整。amend 会创建新 attempt，旧 attempt 结果只审计、不覆盖新 revision；cancel 传播到 attempt task，但不撤销已发生的外部写。真实外部工具、通知/计划/HTTP 尚未实现。契约与未验证项见 [Job/Attempt 与产物](../../docs/design/jobs-and-artifacts.md)。

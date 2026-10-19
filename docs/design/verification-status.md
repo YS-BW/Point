@@ -79,6 +79,16 @@
 
 完成边界：显式 Profile、上下文 sections/预算、手动压缩与压缩模型保护。**WP1b.2b 完成不代表 WP1b/G1 完成**。未验证/未实现：自动阈值压缩长跑与真实模型压缩质量、USER.md 真实导入/文件监听、HTTP/CLI；进程在 compaction summarize 前后被杀时压缩任务 fail-closed，但 `point.model-call` 可能停留 `attempting`（本轮无压缩恢复核销路径，压缩三态证据不完整）；internal-execution chat section fallback、provider error/取消派发路径未进仓库测试；无进程级 SIGKILL fixture。上述项不能由手动压缩 happy path 外推。
 
+## WP1b.3 Job/Attempt、工具与产物（2026-10-19）
+
+2026-10-19T02:13:33Z，根目录 `npm run check`、`npm run build` 与 `npm test` 通过：**127 项测试全部通过，0 fail / 0 skip**。构成：服务端既有 **92 项**（chats 7 + conversation-experience 11 + lifecycle 15 + resource 18 + resource-operations 23 + profile 6 + context-budget 4 + compaction 8）+ 本片新增 **25 项**（job 16 + artifact 9）+ `scripts/boundaries.test.mjs` **10 项**。targeted `node --test apps/server/dist/test/{job,artifact}.test.js` 为 **25/25**。
+
+实现：Job 与 Attempt 分离（`point.job`/`point.attempt`/`point.job-execution`/`point.command.job`）；start/amend/cancel 单 commit + commit 后 abort；attempt task 恢复沿用同 task/attempt，完成写入 revision fence（current attempt + revision + 非 cancelled），至少一个 sealed artifact 才能 ready；`save_artifact` 只在 execution conversation 可用，`point.artifact` writing→sealed、tmp+fsync+rename、sha256/bytes、受限路径（`<jobId>/<attemptId>/<sanitized artifactId>/<name>`），verify 可发现篡改/缺失。独立 reviewer 审计关闭：B1（artifact writing 崩溃窗口缺 fixture）、P1（收据键作用域）、P2（cancel 改写已完成 attempt）、P3（同名 artifact 路径覆盖）；P4 优雅关闭/重启行为与 P5/P6 已知限制写入契约。
+
+原型 `POINT_CRASH_ROUNDS=1 npm test`（**28 项，0 fail / 0 skip**）通过；OpenSpec `agent-jobs-artifacts` strict 通过。证据：[WP1b.3 完整验收输出](../../infra/pi-durable-validation/evidence/wp1b-3-jobs-artifacts-2026-10-19T02-13-33Z.json)。
+
+完成边界：Job/Attempt 身份、工具与产物。**WP1b.3 完成不代表 WP1b/G1 完成**。未验证/未实现：真实模型质量、真实外部工具/浏览器、计划/判断/投递/通知（WP1b.4）、HTTP、Docker、旧库迁移；artifact 文件与 Durable 文档非同一事务，`verify` 只能在读取时发现篡改/缺失，不能在 ready 后持续保证；artifact 写后 doc 前/结果 commit 前的其余崩溃窗口、结果 commit 前窗口未单独 fixture；cancel 只 abort attempt task、不 abort execution conversation，取消后 in-flight 模型循环可能继续消耗调用但不会 ready（P5）；`ArtifactState.unknown` 本片未产生（P6）；无长跑/性能/多层并发压力。上述项不能由 127 项绿推为完整。
+
 ## 已被取代、不要引用的旧口径
 
 - `runtime/acceptance-summary.json` 写 `testsPassed 24/24`，是 2026-10-18T03:08Z 的旧口径（当时还没有后 4 项）。**不要引用。**
