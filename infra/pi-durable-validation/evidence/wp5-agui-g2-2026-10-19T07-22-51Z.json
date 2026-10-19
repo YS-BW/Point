@@ -1,0 +1,51 @@
+{
+  "title": "WP5 AG-UI projection gate (G2)",
+  "generatedAt": "2026-10-19T07:22:51Z",
+  "status": "passed",
+  "head": "98c47e4 merge(wp5): AG-UI 1.0 run projection",
+  "branch": "wp/5-agui-projection (b5e1211)",
+  "gate": {
+    "name": "G2 契约就绪",
+    "definition": "WP4 + WP5：REST 与 AG-UI 的契约测试通过，CLI 消费新协议",
+    "verdict": "passed",
+    "interpretation_note": "No product CLI existed before this gate; the reference CLI apps/server/src/cli.ts is the first consumer added here. The prototype CLI in infra/pi-durable-validation was deliberately not replaced. If '切换 CLI' is meant to require replacing an existing product CLI, that remains a follow-up."
+  },
+  "scope": "POST /v1/agent foreground run projection to AG-UI 1.0: RUN_STARTED/RUN_ERROR first, TEXT_MESSAGE_*, TOOL_CALL_START/ARGS/END/RESULT, STEP_STARTED/FINISHED (turn-N), RUN_FINISHED(outcome+usage), strict LIFO entity closing, tolerance rules, transport-vs-SSE boundary, reserved point.ui.* CUSTOM contract, reference CLI.",
+  "results": [
+    {"command": "npm run check", "status": "passed", "details": "tsc --noEmit + scripts/check-boundaries.mjs"},
+    {"command": "npm test", "status": "passed", "details": "316/316 tests, 0 failed, 0 skipped (server 305 + scripts 11); clean build included"},
+    {"command": "node --test apps/server/dist/test/agui.test.js", "status": "passed", "details": "13/13 AG-UI contract tests incl. strict LIFO order, nested tools, multi-step, tolerance, truncation, cancellation"},
+    {"command": "node --test scripts/boundaries.test.mjs", "status": "passed", "details": "11/11 boundary tests incl. the new explicit cli.ts lane (node: builtins only)"},
+    {"command": "cd infra/pi-durable-validation && npm run check", "status": "passed", "details": "28 modules syntax-checked"},
+    {"command": "cd infra/pi-durable-validation && POINT_CRASH_ROUNDS=1 npm test", "status": "passed", "details": "28/28 prototype tests"},
+    {"command": "openspec validate agent-agui-projection --strict", "status": "passed", "details": "change valid and complete"}
+  ],
+  "independentVerification": {
+    "round1": "10/10 via real startServer + real openRuntime/SQLite + own SSE parser: frames, boundaries, failure RUN_ERROR, truncation without FINISHED, cancellation, tolerance/fail-closed, auth, run isolation, point.ui, reference CLI",
+    "round2": "15/15 on the LIFO fix: exact cancellation frame suffix TEXT_MESSAGE_END -> STEP_FINISHED -> RUN_FINISHED(cancelled); tool LIFO via projection and scripted HTTP port; validator hardening; cli.ts lane; transport-vs-SSE boundary"
+  },
+  "independentAudit": {
+    "first": "docs/team/reviews/wp5-agui-projection.md - 1 blocker: closeEntities grouped by type instead of strict LIFO",
+    "reaudit": "docs/team/reviews/wp5-agui-projection-reaudit.md - B1 fixed; 1 remaining blocker: point.ui accepted document./window. dot references",
+    "final": "docs/team/reviews/wp5-agui-projection-final.md - PASSED, no remaining blockers"
+  },
+  "closedBlockers": [
+    "AG-UI entity closing was grouped by type (tool, step, message) instead of strict last-opened-first-closed; replaced with a single open-entity stack",
+    "point.ui validator accepted DOM dot references (document.cookie, window.location); added normalized DOM_REFERENCE rejection",
+    "point.ui validator accepted attribute injection, code-shaped strings, obfuscated schemes and proto-polluting keys; strict allowlist added",
+    "cli.ts was an unregistered root file skipped by the boundary checker; now an explicit lane limited to node: builtins"
+  ],
+  "usage_derivation": "RUN_FINISHED.usage is a diff of the session UsageState ledger aggregated per model/tool bucket: derived, not a provider bill (no cost, no per-call split, retry/compaction attribution may differ). Documented in README and design.",
+  "unverified": [
+    "real provider token streaming, network drops/reconnects and rate limiting (only pi-ai faux provider used)",
+    "real tool execution end-to-end into TOOL_CALL_* frames (foreground chat run does not register a tool extension; tool ordering covered via projection and scripted port)",
+    "usage reconciliation against provider billing",
+    "multi-client / follow-up run isolation beyond two concurrent runs on one chat",
+    "SSE reverse-proxy buffering, backpressure, half-open/EPIPE handling (no explicit response error listener)",
+    "Last-Event-ID, state/messages snapshots, ACTIVITY, run stream (WP6) and interrupt/resume (WP7)",
+    "duplicate end events may emit duplicate END frames (SDK does not normally repeat)",
+    "point.ui bracket-form DOM access (document[\"cookie\"]) not covered; no emission path exists yet",
+    "high-frequency concurrency, long runs, idle/settle timeouts"
+  ],
+  "notes": "AG-UI types stay confined to apps/server/src/api/agui/**, runtime exposes provider-neutral events, application/domain stay SDK- and AG-UI-free. No new dependencies, no second execution engine, no second source of facts."
+}

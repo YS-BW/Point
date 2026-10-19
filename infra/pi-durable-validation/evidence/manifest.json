@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T06:49:53.000000+00:00",
+  "generatedAt": "2026-10-19T07:22:51.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -175,6 +175,13 @@
       "bytes": 5033,
       "sha256": "a1d4a4976603f184174bed23640f6d319c0451d4a787d5c9a9b6ccb0e5aff6b8",
       "source": "WP3 state v2/migration and WP4 API v1 gate commands, independent verification and audit",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp5-agui-g2-2026-10-19T07-22-51Z.json",
+      "bytes": 5000,
+      "sha256": "6ff02c1bb26fbd0d09a176b7930df86a776609a0458f958521a0238dc14d6b59",
+      "source": "WP5 AG-UI projection gate (G2) commands, independent verification and audit",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

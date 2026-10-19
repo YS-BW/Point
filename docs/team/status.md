@@ -51,3 +51,11 @@
 - 审计/验证关闭的 blocker：profile 上限并发越界、迁移 engine 误报 already-migrated、cleanup 保护 TOCTOU、cleanup dryRun 预览不准确。
 - **闸门未过**：G2 需 WP4+WP5，G3 需 WP3+WP6；本轮只完成 WP3/WP4 工作包本身。
 - 未验证项（迁移与清扫、HTTP 层）见 [verification-status](../design/verification-status.md) 对应段落；证据：[wp3-wp4-gate](../../infra/pi-durable-validation/evidence/wp3-wp4-gate-2026-10-19T06-49-53Z.json)。
+
+## WP5 AG-UI 投影与 G2（2026-10-19）
+
+- `wp/5-agui-projection`（`b5e1211`）经两轮独立验证（10/10、15/15）与两轮审计（各 1 blocker，修复后终审通过）合并进 main。
+- 根目录 `npm run check`、`npm test`：**316/316**；原型 28/28；`agent-agui-projection` OpenSpec strict 通过。
+- **G2（契约就绪）宣布通过**：REST（WP4 15/15）+ AG-UI（13/13）契约测试通过，参考 CLI 消费新协议。口径注意：此前无产品 CLI 可切换，原型 CLI 未替换。
+- 下一个闸门 G3 = WP3 + WP6（读模型 + 增量事件/线程流/`Last-Event-ID`/运行流），WP6 已解锁。
+- 证据：[wp5-agui-g2](../../infra/pi-durable-validation/evidence/wp5-agui-g2-2026-10-19T07-22-51Z.json)。
