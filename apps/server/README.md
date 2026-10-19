@@ -232,6 +232,7 @@ const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, 
 
 - 每个块恰好一条 `data: <一个 JSON 事件>\n\n`；不使用 `event:` 语义、不使用多事件帧（消费端可忽略 `id:`，本片不发送）。
 - 首帧必须是 `RUN_STARTED` 或 `RUN_ERROR`；正常结束必须是 `RUN_FINISHED`（`outcome: success|cancelled`、`usage`）；流内失败以 `RUN_ERROR`（固定 message，不泄漏栈/路径/凭据）结束。
+- **传输级失败不开 SSE**：鉴权失败/未配置 token、`Content-Type` 或 JSON 非法、body 超限、缺/非法 `Idempotency-Key`、`agent` 未就绪（`RUNTIME_NOT_READY`）、未知路径/方法等，返回 WP4 统一 JSON 信封（400/401/404/405/413/503），此时**没有 SSE、也就没有 `RUN_STARTED`**；只有传输层与鉴权均通过、请求已被受理后才打开 `text/event-stream`，其首帧才是 `RUN_STARTED`/`RUN_ERROR`（已受理请求的语义坏值以 `RUN_ERROR` 表达）。
 - **截断不伪造完成**：客户端断开或服务端关闭导致的中断流**不发** `RUN_FINISHED`，客户端据此区分"完成"与"断了"。
 - **取消**：既有 `POST /v1/chats/:id/stop` 仍有效；run 被停止时先关闭已开实体（`TEXT_MESSAGE_END`/`STEP_FINISHED`/`TOOL_CALL_END`），再以 `RUN_FINISHED` `outcome:"cancelled"` 结束，不会静默断流。
 - `protocolVersion`：`"1.0"`（随 `RUN_STARTED`/`RUN_FINISHED` 提供）。

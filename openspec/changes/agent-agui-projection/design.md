@@ -90,6 +90,7 @@
 
 - `threadId`：客户端提供的已存在数字 chat id（一个 chat = 一个 thread）；runId 由服务端 `randomUUID` 生成，客户端 `runId` 忽略（AG-UI 客户端可用服务端返回值对账）。
 - 复用 WP4：`Authorization: Bearer`、无 token 时 `/v1` fail-closed 503、`Idempotency-Key`（8..128）映射既有 `conversation.send` 的 `requestId`、`Content-Type: application/json`、1 MiB 上限、访问日志白名单（流式请求额外一条 `http.stream_open` 入口记录，退出记录仍是一条 `http.access`）。
+- **传输级失败不开 SSE**：鉴权/未配置 token、Content-Type/JSON、body 上限、Idempotency-Key、agent 未就绪、未知路径/方法返回 WP4 JSON 信封；只有已受理请求才开 `text/event-stream`，首帧为 `RUN_STARTED`/`RUN_ERROR`。
 - 输入是 AG-UI `RunAgentInput` 子集：`threadId` + `messages`（取最后一条 user 文本）；`runId` 可选 string；`tools`/`context`/`state`/`forwardedProps` 与其它未知字段容忍但忽略，不改变服务端权威状态。已知字段坏值 → SSE `RUN_ERROR`（`INVALID_COMMAND`），不启动 run。
 
 ### SSE 与生命周期

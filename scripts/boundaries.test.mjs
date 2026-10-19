@@ -15,6 +15,14 @@ test('boundary permits inward imports and SDK only at implementation edge', () =
   assert.notEqual(check("import {Harness} from '@earendil-works/pi-durable'", 'api').length, 0);
 });
 
+test('the reference CLI lane is explicit and may only import node builtins', () => {
+  const cli = source => violations(resolve('apps/server/src/cli.ts'), source);
+  assert.deepEqual(cli("import {randomUUID} from 'node:crypto'"), []);
+  assert.notEqual(cli("import {openRuntime} from './runtime/open.js'").length, 0);
+  assert.notEqual(cli("import {createHttp} from './api/http.js'").length, 0);
+  assert.notEqual(cli("import {Harness} from '@earendil-works/pi-durable'").length, 0);
+});
+
 test('new folders and absolute imports cannot silently bypass layering', () => {
   assert.notEqual(check("import x from '@earendil-works/pi-durable'", 'unregistered').length, 0);
   assert.notEqual(check("import x from 'file:///tmp/implementation.js'", 'api').length, 0);

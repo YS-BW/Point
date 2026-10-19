@@ -6,6 +6,18 @@
 
 ## ADDED Requirements
 
+### Requirement: Transport failures stay on the REST envelope
+
+Failures before a request is accepted (auth, content type/JSON, body limit, Idempotency-Key, agent/runtime not ready, unknown path or method) MUST return the WP4 JSON error envelope and MUST NOT open an SSE stream. Only an accepted request opens `text/event-stream`, whose first event is then `RUN_STARTED` or `RUN_ERROR`.
+
+#### Scenario: Unauthorized request
+- **WHEN** a configured server receives `/v1/agent` without a valid bearer
+- **THEN** it returns 401 with `{error:{code:'UNAUTHORIZED',...}}` and no SSE stream
+
+#### Scenario: Missing Idempotency-Key
+- **WHEN** `/v1/agent` is called without `Idempotency-Key`
+- **THEN** it returns 400 `INVALID_COMMAND` as JSON and no run starts
+
 ### Requirement: The run stream has a mandatory boundary
 
 `POST /v1/agent` MUST return `text/event-stream` whose first event is `RUN_STARTED` or `RUN_ERROR`, and whose normal close is `RUN_FINISHED` with an `outcome`.

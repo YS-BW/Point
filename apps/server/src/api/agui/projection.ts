@@ -1,7 +1,8 @@
 /**
  * Maps provider-neutral runtime events to AG-UI 1.0 wire events for exactly one run.
- * Tracks open message/step/tool entities so cancellation and errors close them before
- * the final boundary; truncation simply stops without a boundary.
+ * Tracks open entities on a single creation-order stack so cancellation and errors close
+ * them in strict global LIFO order before the final boundary; truncation stops without a
+ * boundary and closes nothing.
  */
 
 import type { AgentRunEvent, AgentUsage } from '../../application/agent-stream.js';
@@ -10,10 +11,13 @@ import { PROTOCOL_VERSION } from './events.js';
 
 export type FrameWriter = (event: AguiEvent) => Promise<void>;
 
+type OpenEntity =
+  | Readonly<{kind: 'message'; messageId: string}>
+  | Readonly<{kind: 'step'; stepName: string}>
+  | Readonly<{kind: 'tool'; toolCallId: string}>;
+
 export class RunProjection {
-  private openMessage: string | undefined;
-  private readonly openSteps: string[] = [];
-  private readonly openTools = new Set<string>();
+  private readonly open: OpenEntity[] = [];
   private toolResultSeq = 0;
 
   constructor(
@@ -33,34 +37,31 @@ export class RunProjection {
   async handle(event: AgentRunEvent): Promise<void> {
     switch (event.type) {
       case 'message_start':
-        if (this.openMessage !== undefined) await this.closeMessage();
-        this.openMessage = event.messageId;
+        this.open.push({kind: 'message', messageId: event.messageId});
         await this.writer({type: 'TEXT_MESSAGE_START', messageId: event.messageId, role: 'assistant'});
         return;
       case 'text_delta':
         await this.writer({type: 'TEXT_MESSAGE_CONTENT', messageId: event.messageId, delta: event.delta});
         return;
       case 'message_end':
-        if (this.openMessage === event.messageId) {
-          await this.closeMessage();
-        } else {
-          await this.writer({type: 'TEXT_MESSAGE_END', messageId: event.messageId});
-        }
+        this.remove(entity => entity.kind === 'message' && entity.messageId === event.messageId);
+        await this.writer({type: 'TEXT_MESSAGE_END', messageId: event.messageId});
         return;
-      case 'tool_start':
-        this.openTools.add(event.toolCallId);
+      case 'tool_start': {
+        const parentMessageId = this.enclosingMessage();
+        this.open.push({kind: 'tool', toolCallId: event.toolCallId});
         await this.writer({
           type: 'TOOL_CALL_START', toolCallId: event.toolCallId, toolCallName: event.toolName,
-          ...(this.openMessage === undefined ? {} : {parentMessageId: this.openMessage}),
+          ...(parentMessageId === undefined ? {} : {parentMessageId}),
         });
         // The SDK exposes structured argument deltas, not raw JSON fragments; one full,
         // truthful args frame is emitted instead of faking incremental tokens.
         await this.writer({type: 'TOOL_CALL_ARGS', toolCallId: event.toolCallId, delta: event.argsJson});
         return;
+      }
       case 'tool_end':
-        if (this.openTools.delete(event.toolCallId)) {
-          await this.writer({type: 'TOOL_CALL_END', toolCallId: event.toolCallId});
-        }
+        this.remove(entity => entity.kind === 'tool' && entity.toolCallId === event.toolCallId);
+        await this.writer({type: 'TOOL_CALL_END', toolCallId: event.toolCallId});
         return;
       case 'tool_result':
         await this.writer({
@@ -69,11 +70,11 @@ export class RunProjection {
         });
         return;
       case 'step_start':
-        this.openSteps.push(event.name);
+        this.open.push({kind: 'step', stepName: event.name});
         await this.writer({type: 'STEP_STARTED', stepName: event.name});
         return;
       case 'step_end':
-        this.removeStep(event.name);
+        this.remove(entity => entity.kind === 'step' && entity.stepName === event.name);
         await this.writer({type: 'STEP_FINISHED', stepName: event.name});
         return;
       case 'run_end':
@@ -83,18 +84,18 @@ export class RunProjection {
     }
   }
 
-  /** Close every open entity (LIFO) without ending the run. */
+  /** Close every still-open entity in strict global reverse-creation order. */
   async closeEntities(): Promise<void> {
-    for (const toolCallId of [...this.openTools].reverse()) {
-      this.openTools.delete(toolCallId);
-      await this.writer({type: 'TOOL_CALL_END', toolCallId});
+    while (this.open.length > 0) {
+      const entity = this.open.pop()!;
+      if (entity.kind === 'tool') {
+        await this.writer({type: 'TOOL_CALL_END', toolCallId: entity.toolCallId});
+      } else if (entity.kind === 'message') {
+        await this.writer({type: 'TEXT_MESSAGE_END', messageId: entity.messageId});
+      } else {
+        await this.writer({type: 'STEP_FINISHED', stepName: entity.stepName});
+      }
     }
-    for (let index = this.openSteps.length - 1; index >= 0; index -= 1) {
-      const stepName = this.openSteps[index]!;
-      this.openSteps.splice(index, 1);
-      await this.writer({type: 'STEP_FINISHED', stepName});
-    }
-    await this.closeMessage();
   }
 
   async finish(outcome: 'success' | 'cancelled', usage: AgentUsage): Promise<void> {
@@ -120,15 +121,20 @@ export class RunProjection {
     await this.writer({type: 'RUN_ERROR', message, ...(code.length === 0 ? {} : {code})});
   }
 
-  private async closeMessage(): Promise<void> {
-    if (this.openMessage === undefined) return;
-    const messageId = this.openMessage;
-    this.openMessage = undefined;
-    await this.writer({type: 'TEXT_MESSAGE_END', messageId});
+  private enclosingMessage(): string | undefined {
+    for (let index = this.open.length - 1; index >= 0; index -= 1) {
+      const entity = this.open[index]!;
+      if (entity.kind === 'message') return entity.messageId;
+    }
+    return undefined;
   }
 
-  private removeStep(name: string): void {
-    const index = this.openSteps.lastIndexOf(name);
-    if (index >= 0) this.openSteps.splice(index, 1);
+  private remove(match: (entity: OpenEntity) => boolean): void {
+    for (let index = this.open.length - 1; index >= 0; index -= 1) {
+      if (match(this.open[index]!)) {
+        this.open.splice(index, 1);
+        return;
+      }
+    }
   }
 }

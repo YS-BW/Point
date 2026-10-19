@@ -251,7 +251,7 @@ test('server-side failure after RUN_STARTED ends with RUN_ERROR, not RUN_FINISHE
 /* Cancellation                                                               */
 /* -------------------------------------------------------------------------- */
 
-test('cancellation closes open message/step/tool entities then finishes with outcome cancelled', async t => {
+test('cancellation closes open entities in strict global LIFO order, then finishes cancelled', async t => {
   const f = await serve(t, fakePort([
     {type: 'step_start', name: 'turn-1'},
     {type: 'message_start', messageId: 'm-1'},
@@ -262,13 +262,45 @@ test('cancellation closes open message/step/tool entities then finishes with out
   ]));
   const events: Record<string, unknown>[] = [];
   for await (const event of readFrames(await postAgent(f, input()))) events.push(event);
-  assert.equal(events.at(-1)!.type, 'RUN_FINISHED');
+  // Creation order step -> message -> tool: strict LIFO closes tool, then message, then step.
+  assert.deepEqual(events.map(event => event.type), [
+    'RUN_STARTED', 'STEP_STARTED', 'TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT',
+    'TOOL_CALL_START', 'TOOL_CALL_ARGS',
+    'TOOL_CALL_END', 'TEXT_MESSAGE_END', 'STEP_FINISHED', 'RUN_FINISHED',
+  ]);
   assert.equal(events.at(-1)!.outcome, 'cancelled');
-  const types = events.map(event => event.type);
-  assert.ok(types.indexOf('TOOL_CALL_END') < types.indexOf('RUN_FINISHED'));
-  assert.ok(types.indexOf('TEXT_MESSAGE_END') < types.indexOf('RUN_FINISHED'));
-  assert.ok(types.indexOf('STEP_FINISHED') < types.indexOf('RUN_FINISHED'));
-  assert.ok(!types.includes('RUN_ERROR'));
+  assert.equal(events[6]!.toolCallId, 'call-1');
+  assert.equal(events[7]!.messageId, 'm-1');
+  assert.equal(events[8]!.stepName, 'turn-1');
+  assert.ok(!events.some(event => event.type === 'RUN_ERROR'));
+});
+
+test('cancellation closes nested tool calls in reverse creation order', async t => {
+  const f = await serve(t, fakePort([
+    {type: 'step_start', name: 'turn-1'},
+    {type: 'message_start', messageId: 'm-1'},
+    {type: 'tool_start', toolCallId: 'parent-1', toolName: 'browser', argsJson: '{}'},
+    {type: 'tool_start', toolCallId: 'parent-1/nested-1', toolName: 'click', argsJson: '{}'},
+    {type: 'run_end', outcome: 'cancelled', usage},
+  ]));
+  const events: Record<string, unknown>[] = [];
+  for await (const event of readFrames(await postAgent(f, input()))) events.push(event);
+  const closing = events.filter(event => event.type === 'TOOL_CALL_END');
+  assert.deepEqual(closing.map(event => event.toolCallId), ['parent-1/nested-1', 'parent-1']);
+  assert.deepEqual(events.slice(-3).map(event => event.type),
+    ['TEXT_MESSAGE_END', 'STEP_FINISHED', 'RUN_FINISHED']);
+});
+
+test('multiple open steps close in strict last-in-first-out order', async t => {
+  const f = await serve(t, fakePort([
+    {type: 'step_start', name: 'turn-1'},
+    {type: 'step_start', name: 'turn-2'},
+    {type: 'run_end', outcome: 'cancelled', usage},
+  ]));
+  const events: Record<string, unknown>[] = [];
+  for await (const event of readFrames(await postAgent(f, input()))) events.push(event);
+  assert.deepEqual(events.filter(event => event.type === 'STEP_FINISHED').map(event => event.stepName),
+    ['turn-2', 'turn-1']);
 });
 
 /* -------------------------------------------------------------------------- */
@@ -328,9 +360,24 @@ test('point.ui CUSTOM contract is declarative and bounded', () => {
     {component: 'point.placeholder', props: {url: 'javascript:alert(1)'}},
     {component: 'point.placeholder', props: {data: 'x'.repeat(4096)}},
     {component: 'point.placeholder', artifactId: '/etc/passwd'},
+    // Inline event handlers and bare JS calls.
+    {component: 'point.placeholder', props: {label: 'onerror=alert(1)'}},
+    {component: 'point.placeholder', props: {label: 'alert(1)'}},
+    // Scheme hiding via newline/space and control characters is refused.
+    {component: 'point.placeholder', props: {label: 'java\nscript:alert(1)'}},
+    {component: 'point.placeholder', props: {label: 'java script:alert(1)'}},
+    {component: 'point.placeholder', props: {label: 'vbscript:msgbox(1)'}},
+    {component: 'point.placeholder', props: {label: 'line\u0000break'}},
+    {component: 'point.placeholder', props: {title: 'line\nbreak'}},
+    // Prototype-pollution and non-whitelisted keys.
+    {component: 'point.placeholder', props: {constructor: {x: 1}}},
+    {component: 'point.placeholder', props: JSON.parse('{"__proto__":{"x":1}}')},
+    {component: 'point.placeholder', props: {Title: 'x'}},
   ]) {
     assert.throws(() => validatePointUiPayload(bad), /INVALID_COMMAND|ui /);
   }
+  assert.deepEqual(validatePointUiPayload({component: 'point.placeholder', props: {title: 'plain text'}}).props,
+    {title: 'plain text'});
   // Unknown AG-UI events/fields are tolerated by consumers.
   assert.equal(isAguiEvent({type: 'FUTURE_EVENT', extra: true}), true);
   assert.equal(isAguiEvent({type: 42}), false);
