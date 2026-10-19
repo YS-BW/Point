@@ -57,6 +57,18 @@
 
 完成：内部对话执行端口的发送、排队、停止、状态、等待与历史查询。**仅 WP1b.1/2a 完成，WP1b 与 G1 未完成**。未实现/未验证：上下文 sections、USER.md、压缩、Job/Attempt、工具与产物、计划/判断/投递/通知、公开 HTTP/AG-UI、浏览器、Docker、真实模型语义、供应商限流退避、长期负载和跨产品版本迁移。
 
+## WP2 资源边界基建（2026-10-19）
+
+2026-10-19T01:31:19Z，根目录 `npm run check` 与 `npm test` 通过：**84 项测试全部通过，0 fail / 0 skip**。构成：服务端既有 **33 项**（chats 7 + conversation-experience 11 + lifecycle 15）+ 本片新增资源边界 **41 项**（resource 18 + resource-operations 23）+ `scripts/boundaries.test.mjs` **10 项**。单独运行 `node --test apps/server/dist/test/resource*.test.js` 为 **41/41**；`node --test scripts/*.test.mjs` 为 **10/10**。
+
+实现：`domain/resource.ts` 纯规则（lease/controlEpoch、acquire/renew/release/takeover/expire、副作用 `intent→attempting→done|failed|unknown` + `cancel`）；`application/resource.ts` 严格输入、幂等收据、`ResourceStore` 原子 commit、`ResourceEffectPort`，以及把“已读前置条件”和写入绑定在同一次 resource CAS guard；`adapters/resource/memory.ts` 仅测试/样板。独立 reviewer 按评审清单审计，发现并修复一个 check-then-write 缺 CAS guard 的 blocker（race A–E 回归测试）；残余的 attempt commit↔effect.invoke 窗口写入契约限制，真实 adapter 必须在执行前自检 epoch。
+
+原型 `npm run check` 与 `POINT_CRASH_ROUNDS=1 npm test`（**28 项，0 fail / 0 skip**）同时通过，原型源码与测试未修改；OpenSpec `agent-resource-boundary` strict 通过。证据：[WP2 完整验收输出](../../infra/pi-durable-validation/evidence/wp2-resource-2026-10-19T01-31-19Z.json)。
+
+审计修复后最终复核（2026-10-19T01:35:09Z，src 已冻结，仅 scripts/test 注释与用例更新）：`npm run check` 通过，`npm test` **84/84 通过**，targeted **41/41**；独立 reviewer 复核通过、无 blocker。证据：[WP2 最终复核输出](../../infra/pi-durable-validation/evidence/wp2-resource-final-2026-10-19T01-35-09Z.json)。
+
+完成边界：资源契约、内存桩、边界不变量与独立测试。**不是完整 WP2，也不是 G1 通过**。未实现/未验证：真实浏览器/文件/通知/网络 adapter；Durable 持久化、迁移与崩溃恢复；组合根接线与 HTTP 错误码映射；多进程/异步存储并发压测、真实 SIGKILL、长时间运行与费用。资源状态目前只在内存 store 中，不能用于真实数据。
+
 ## 已被取代、不要引用的旧口径
 
 - `runtime/acceptance-summary.json` 写 `testsPassed 24/24`，是 2026-10-18T03:08Z 的旧口径（当时还没有后 4 项）。**不要引用。**

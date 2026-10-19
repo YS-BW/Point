@@ -11,6 +11,8 @@ const allowed = {
   runtime: ['runtime', 'storage', 'adapters', 'application', 'domain'],
   adapters: ['adapters', 'application', 'domain'],
 };
+// AST-level invariant: domain/application describe the business model, not the
+// Durable execution engine. Task definitions belong to runtime (agent-core.md #1/#10).
 export function violations(path, source) {
   const lane = relative(root, path).split(sep)[0];
   const errors = [];
@@ -31,6 +33,7 @@ export function violations(path, source) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) check(ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : undefined);
     if (ts.isImportEqualsDeclaration(node)) errors.push('import equals is not allowed');
     if (ts.isImportTypeNode(node)) check(ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal) ? node.argument.literal.text : undefined);
+    if ((lane === 'domain' || lane === 'application') && ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'defineTask') errors.push(`${lane} must not define Durable tasks (found defineTask(...)); define tasks in runtime instead`);
     if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
       check(node.arguments[0] && ts.isStringLiteral(node.arguments[0]) ? node.arguments[0].text : undefined);
     }

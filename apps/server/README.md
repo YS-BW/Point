@@ -1,6 +1,6 @@
 # Point Server foundation
 
-WP1a：独立可运行的基础骨架。WP1b.1 新增内部对话创建/读取端口，WP1b.2a 提供显式模型绑定下的消息/排队/停止/历史应用接口；工具、定时任务与浏览器尚未实现；健康接口只报告 foundation。
+WP1a：独立可运行的基础骨架。WP1b.1 新增内部对话创建/读取端口，WP1b.2a 提供显式模型绑定下的消息/排队/停止/历史应用接口；WP2 落地资源租约、控制权 epoch 与副作用三态的应用/领域契约（内存桩，未持久化）；工具、定时任务、真实资源与浏览器尚未实现；健康接口只报告 foundation。
 
 在仓库根目录，Node >=22.19：
 
@@ -45,3 +45,24 @@ try {
 对话执行复用原生 pi-ai Models 与 Durable loop：向 `openRuntime` 传入 `{models, model: {provider, modelId}}`，再使用 `runtime.conversation.send/stop/status/wait/history`。`send` 返回命令身份，不表示已经回答；`status` 为只读查询。未传模型绑定可以读已有历史，但不能发送或停止。HTTP 仍未发布这些命令。产品场景、SDK 复用依据和未知调用恢复边界见 [对话体验](../../docs/design/conversation-experience.md)。
 
 独立场景验收：`npm run build && node --test apps/server/dist/test/conversation-experience.test.js`，使用脚本供应商与真实 Durable；不调用外网或使用个人凭据。
+
+## 资源边界（WP2）
+
+资源在 Agent 层统一为 `resource{id, owner, lease, controlEpoch, state}`；外部动作走 `intent → attempting → done | unknown | failed`。`unknown` 只能观察核销，不能自动重放。实现分三层：
+
+- `domain/resource.ts`：纯状态转移与 epoch fence（无 IO/SDK）；
+- `application/resource.ts`：严格输入、幂等收据、`ResourceStore` 原子 commit、`ResourceEffectPort`；前置条件与写入共享同一个 resource CAS guard；
+- `adapters/resource/memory.ts`：**仅测试/样板**，不持久化、无崩溃恢复。
+
+```js
+import { resourceCommands } from './apps/server/dist/src/application/resource.js';
+import { memoryResourceStore } from './apps/server/dist/src/adapters/resource/memory.js';
+const commands = resourceCommands(memoryResourceStore(), Date.now);
+const resource = await commands.acquire({resourceId: 'browser:primary', requestId: 'r1', owner: 'me', ttlMs: 60000});
+const operation = await commands.beginOperation({
+  operationId: 'op1', requestId: 'r2', resourceId: resource.id, controlEpoch: resource.controlEpoch,
+});
+const outcome = await commands.runOperation(operation.id, {invoke: async () => 'done-result'});
+```
+
+`unknown` 用 `observeOperation({operationId, status, result, observation})` 核销。真实资源接入必须实现 Durable 持久化 store，并在不可撤销动作前按 `controlEpoch` 再次自检；本轮不接任何真实浏览器/文件/通知 adapter，也没有 HTTP 映射。契约与未验证项见 [资源边界](../../docs/design/resource-boundary.md)。

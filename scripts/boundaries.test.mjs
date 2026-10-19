@@ -19,3 +19,37 @@ test('new folders and absolute imports cannot silently bypass layering', () => {
   assert.notEqual(check("import x from '@earendil-works/pi-durable'", 'unregistered').length, 0);
   assert.notEqual(check("import x from 'file:///tmp/implementation.js'", 'api').length, 0);
 });
+
+test('domain and application cannot define Durable tasks', () => {
+  for (const lane of ['domain', 'application']) {
+    const errors = check('const Job = defineTask({ id: "job" });', lane);
+    assert.notEqual(errors.length, 0);
+    assert.match(errors.join('\n'), /defineTask/);
+    assert.match(errors.join('\n'), /runtime/);
+  }
+  assert.notEqual(check('const Job = defineTask<Input, {phase: "order"}, Result>({ id: "job" });').length, 0);
+});
+
+test('Durable task check ignores comments and string literals', () => {
+  assert.deepEqual(check('// defineTask({ id: "job" })\n/* defineTask({ id: "job" }) */'), []);
+  assert.deepEqual(check('const a = "defineTask({ id: \'job\' })"; const b = \'defineTask(\';'), []);
+  assert.deepEqual(check('const a = `defineTask({ id: "job" })`;'), []);
+});
+
+test('Durable task check still sees code inside template interpolations', () => {
+  assert.notEqual(check('const id = `${defineTask({ id: "job" }).id}`;').length, 0);
+});
+
+test('runtime may define Durable tasks', () => {
+  assert.deepEqual(check('const Job = defineTask<Input, {phase: "order"}, Result>({ id: "job" });', 'runtime'), []);
+  assert.deepEqual(check('const Job = defineTask({ id: "job" });', 'runtime'), []);
+});
+
+test('Durable task check catches function-type generic arguments', () => {
+  assert.notEqual(check('const Job = defineTask<Input, () => void, Result>({ id: "job" });').length, 0);
+  assert.notEqual(check('const Job = defineTask<Input, () => void, Result>({ id: "job" });', 'application').length, 0);
+});
+
+test('runtime may define Durable tasks with function-type generic arguments', () => {
+  assert.deepEqual(check('const Job = defineTask<Input, () => void, Result>({ id: "job" });', 'runtime'), []);
+});

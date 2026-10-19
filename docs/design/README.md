@@ -35,6 +35,7 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 | [验证状态](verification-status.md) | 唯一证据口径：数值、时点、证据路径、复现命令与未验证清单 |
 | [实施路线](roadmap.md) | 工作包（WP）与闸门、并行/串行规则、人机协作协议（不排时间） |
 | [Agent 层架构基调](agent-core.md) | 十条不变量、完成定义（DoD）、边界图与"坐稳"验收清单 |
+| [资源边界](resource-boundary.md) | WP2 资源租约、控制权 epoch、副作用三态与幂等/CAS 契约 |
 | [客户端协议：AG-UI](protocol-agui.md) | 可行性、概念映射、自定义传输补齐断线与后台并发、落地顺序 |
 | [ADR-001 Agent 层选型](adr/ADR-001-agent-layer-selection.md) | 两次选型反转的时间线、依据、未量化项与复核触发条件 |
 | [当前 Durable 原型](../../infra/pi-durable-validation/README.md) | 可运行入口、CLI、故障注入与真实 Steel 验收 |
@@ -55,7 +56,7 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 
 ## 当前实现与下一步
 
-`infra/pi-durable-validation/` 是行为与可行性参考，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`apps/server/` 已建立 WP1a 基础骨架，实际验收见验证状态；完整产品链路按 WP1b 工程化重建，见 [核心重建计划](agent-core-rebuild.md)。`server/` 仍是只读的旧 Pi SDK 验证代码。
+`infra/pi-durable-validation/` 是行为与可行性参考，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`apps/server/` 已建立 WP1a 基础骨架，WP1b.1/2a 的对话命令与执行、WP2 资源边界契约与内存桩已落地；完整产品链路、真实资源 adapter 与持久化仍按后续 WP 重建，见 [核心重建计划](agent-core-rebuild.md) 与 [资源边界](resource-boundary.md)。`server/` 仍是只读的旧 Pi SDK 验证代码。
 
 **当前优先级（2026-10-19 调整）**：先把 Agent 层坐稳——正式 Server 骨架、状态与事件契约、API v1、任务/上下文/记忆/投递的行为契约、常驻与长跑；**浏览器原生 RTC 集成暂缓**，只做止血与资源抽象。推进方式改为工作包（WP）+ 闸门，不按时间排期，人类定判断、agent 负责实现，见[实施路线](roadmap.md)与[AGENTS.md](../../AGENTS.md)。客户端流协议采用 [AG-UI 1.0](protocol-agui.md) 作为边缘投影，内部事件模型不变。必须遵守的约束见[Agent 层架构基调](agent-core.md)。
 
