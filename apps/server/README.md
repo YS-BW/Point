@@ -212,3 +212,63 @@ const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, 
 ```
 
 默认 30 天 / 10k 条、单次最多 1000 条；最近 `keepCount` 条与未过 `keepMs` 的收据保留。保护规则：active job、active schedule、`attempting`/未核销 `unknown` operation、无法解析引用（fail-closed）永不删除；保护判定在删除 commit 内对已提交状态重新校验。只读 runtime 调用清扫抛 `READ_ONLY`。事件/索引均为派生数据；备份保留策略、大库迁移耗时、原型 HTTP/真实读模型不在本片。设计见 [状态 v2](../../docs/design/state-v2.md)，证据数字由 Lead 统一维护。
+
+## AG-UI 投影：`POST /v1/agent`（WP5）
+
+一次前台 run 一条 `text/event-stream`。端点复用 `/v1` 的 Bearer、fail-closed 503、1 MiB 请求体上限与访问日志；成功流以 `RUN_STARTED` 开始、以 `RUN_FINISHED` 结束（`outcome` + `usage`），失败以 `RUN_ERROR` 结束。内部事实仍在 Durable，AG-UI 只是投影（见 [协议评估](../../docs/design/protocol-agui.md)）。
+
+### 输入（AG-UI `RunAgentInput` 子集）
+
+```json
+{"threadId":"9","runId":"client-supplied-ignored","messages":[{"id":"m1","role":"user","content":"你好"}]}
+```
+
+- 必须带 `Idempotency-Key`（8..128 字符）→ 映射为既有 `conversation.send` 的 `requestId`；`Content-Type: application/json`，body ≤1 MiB。
+- `threadId` 必须是已存在的数字 chat id（一个 chat = 一个 thread）。`runId` 由**服务端生成**（客户端值忽略，`RUN_STARTED/RUN_FINISHED` 返回服务端 runId）。
+- 取最后一条 `role:"user"` 的文本内容（string 或 text parts）；`tools`/`context`/`state`/`forwardedProps` 及其他未知字段被**容忍但忽略**（不改变服务端权威状态）。
+- 已知字段类型/取值错误（缺 threadId、messages 非数组、content 非文本、runId 非 string 等）→ 仍以 SSE 返回 `RUN_ERROR`（`code: INVALID_COMMAND`），不启动 run。
+
+### SSE 帧与生命周期
+
+- 每个块恰好一条 `data: <一个 JSON 事件>\n\n`；不使用 `event:` 语义、不使用多事件帧（消费端可忽略 `id:`，本片不发送）。
+- 首帧必须是 `RUN_STARTED` 或 `RUN_ERROR`；正常结束必须是 `RUN_FINISHED`（`outcome: success|cancelled`、`usage`）；流内失败以 `RUN_ERROR`（固定 message，不泄漏栈/路径/凭据）结束。
+- **传输级失败不开 SSE**：鉴权失败/未配置 token、`Content-Type` 或 JSON 非法、body 超限、缺/非法 `Idempotency-Key`、`agent` 未就绪（`RUNTIME_NOT_READY`）、未知路径/方法等，返回 WP4 统一 JSON 信封（400/401/404/405/413/503），此时**没有 SSE、也就没有 `RUN_STARTED`**；只有传输层与鉴权均通过、请求已被受理后才打开 `text/event-stream`，其首帧才是 `RUN_STARTED`/`RUN_ERROR`（已受理请求的语义坏值以 `RUN_ERROR` 表达）。
+- **截断不伪造完成**：客户端断开或服务端关闭导致的中断流**不发** `RUN_FINISHED`，客户端据此区分"完成"与"断了"。
+- **取消**：既有 `POST /v1/chats/:id/stop` 仍有效；run 被停止时先关闭已开实体（`TEXT_MESSAGE_END`/`STEP_FINISHED`/`TOOL_CALL_END`），再以 `RUN_FINISHED` `outcome:"cancelled"` 结束，不会静默断流。
+- `protocolVersion`：`"1.0"`（随 `RUN_STARTED`/`RUN_FINISHED` 提供）。
+
+### 真实投影的事件族（按 SDK 公开能力裁剪）
+
+| 事件 | 来源 |
+|---|---|
+| `RUN_STARTED` / `RUN_FINISHED` | `conversation.send` 受理 + `run_start`/`run_end` + submission 结算 |
+| `TEXT_MESSAGE_START/CONTENT/END` | `message_start` + 真实 `text_delta`（providers 不支持逐 token 时 SDK 可能给整段变更；投影仍按序发出，不伪造分片） |
+| `TOOL_CALL_START/ARGS/END/RESULT` | `tool_execution_start/end`；`ARGS` 为一次完整 canonical JSON（SDK 无原始 JSON 分片，不伪造 token 流）；结果有界（8 KiB） |
+| `STEP_STARTED/FINISHED` | `turn_start`/`turn_end`（stepName=`turn-N`，真实回合边界） |
+| `RUN_ERROR` | 受理/校验/MODEL_NOT_CONFIGURED/CHAT_NOT_FOUND/运行失败（固定 message+稳定 code） |
+
+**不投影（能力不足或范围外，宁可不发）**：`REASONING_*`、`TOOL_CALL_ARGS` 逐 token 分片、`STATE_*`/`MESSAGES_SNAPSHOT`/`ACTIVITY_*`/`SUBAGENT_*`/`RAW`、`Last-Event-ID` 重放、interrupt/resume、后台任务进度（均属 WP6/WP7）。
+
+### usage 口径（派生，不是 provider 账单）
+
+`RUN_FINISHED.usage = {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalTokens}`，由 run 开始与结束时的**会话 `UsageState` 账本差分**按 model/tool bucket 汇总得到。它是真实 Durable 记录上的派生口径：**按 bucket 聚合、不保证 provider 精确账单**（不拆分单次调用、不含 cost/货币、retry/compaction 的归属可能与 provider 账单不同）；未验证项。
+
+### `point.ui.*` CUSTOM 契约（仅占位，不渲染）
+
+- 唯一扩展通道 `CUSTOM`，name 固定 `point.ui.component`；**本片不生成任何 UI 事件**，只冻结校验契约供后续片使用。
+- value 形状：`{component, props?, artifactId?}`；组件名须为已登记白名单（WP5 仅占位 `point.placeholder`，客户端需预先注册组件语义）。
+- 有界：props 序列化 ≤2048 字节、深度 ≤4、key/数组 ≤32、字符串 ≤512 字符、必须 JSON-safe；**禁止** `<>`、`javascript:`、`data:` 等可在客户端执行的 HTML/JS/DOM 内容；`artifactId` 只允许受限标识符。
+- 服务端不解释渲染语义、不写 Durable UI 状态；任何声称"生成 UI 代码/HTML"的行为都不属于本契约。
+
+### 参考 CLI（协议第一个消费者）
+
+```sh
+POINT_API_TOKEN=... npm run cli -w @point/server -- --message "你好"
+node apps/server/dist/src/cli.js --url http://127.0.0.1:4310 --token ... --chat 9 --message "继续"
+```
+
+打印 run/step/tool 摘要与文本增量、`[done] outcome=... totalTokens=...`；`RUN_ERROR` 以非零退出码结束。它是参考消费者，**不替换**原型 CLI。
+
+### 未验证 / 边界
+
+真实 provider 的逐 token 流、tool call 的 provider 参数分片、真实网络断线/重连、多客户端并发 run 隔离（本片按"一次前台 run"设计）、`Last-Event-ID`/快照恢复、interrupt/resume、usage 与 provider 账单对账均未验证。SSE 反向代理/缓冲行为与背压仅在本地 Node 环境验证。

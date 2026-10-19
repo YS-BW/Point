@@ -11,17 +11,24 @@ const allowed = {
   runtime: ['runtime', 'storage', 'adapters', 'application', 'domain'],
   adapters: ['adapters', 'application', 'domain'],
 };
+/** Composition-root modules are their own lanes with explicit import rules. */
+const rootLanes = new Set(['main.ts', 'bootstrap.ts', 'config.ts', 'cli.ts']);
 // AST-level invariant: domain/application describe the business model, not the
 // Durable execution engine. Task definitions belong to runtime (agent-core.md #1/#10).
 export function violations(path, source) {
   const lane = relative(root, path).split(sep)[0];
   const errors = [];
-  if (!allowed[lane] && !['main.ts', 'bootstrap.ts', 'config.ts'].includes(lane)) errors.push(`unregistered architectural layer ${lane}`);
+  if (!allowed[lane] && !rootLanes.has(lane)) errors.push(`unregistered architectural layer ${lane}`);
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   function check(spec) {
     if (typeof spec !== 'string') { errors.push('nonliteral module loading'); return; }
     if (/pi-coding-agent|deepseek-harness|@ag-ui/.test(spec) && !(spec.startsWith('@ag-ui/') && lane === 'api')) errors.push(`forbidden dependency ${spec}`);
     if (/^(?:file:|\/)/.test(spec)) errors.push('absolute module imports are not allowed');
+    // The reference CLI is a standalone transport client: node builtins only, no internal/SDK imports.
+    if (lane === 'cli.ts') {
+      if (!spec.startsWith('node:')) errors.push(`cli.ts may only import node builtins (got ${spec})`);
+      return;
+    }
     if (!allowed[lane]) return;
     if (spec.startsWith('.')) {
       const target = relative(root, resolve(dirname(path), spec)).split(sep)[0];

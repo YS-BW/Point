@@ -1,8 +1,14 @@
 {
-  "name": "@point/server", "version": "0.0.0", "private": true, "type": "module",
+  "name": "@point/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
   "dependencies": {
     "@earendil-works/chord": "1.3.0",
     "@earendil-works/pi-ai": "1.3.0",
     "@earendil-works/pi-durable": "1.3.0"
+  },
+  "scripts": {
+    "cli": "node dist/src/cli.js"
   }
 }
