@@ -367,6 +367,10 @@ test('point.ui CUSTOM contract is declarative and bounded', () => {
     {component: 'point.placeholder', props: {label: 'java\nscript:alert(1)'}},
     {component: 'point.placeholder', props: {label: 'java script:alert(1)'}},
     {component: 'point.placeholder', props: {label: 'vbscript:msgbox(1)'}},
+    // DOM property access is refused even without a call.
+    {component: 'point.placeholder', props: {label: 'document.cookie'}},
+    {component: 'point.placeholder', props: {label: 'window.location.href'}},
+    {component: 'point.placeholder', props: {label: 'document . cookie'}},
     {component: 'point.placeholder', props: {label: 'line\u0000break'}},
     {component: 'point.placeholder', props: {title: 'line\nbreak'}},
     // Prototype-pollution and non-whitelisted keys.

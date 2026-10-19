@@ -22,6 +22,8 @@ const RAW_MARKUP = /[<>]/;
 const FORBIDDEN_SCHEME = /(?:javascript|data|vbscript):/i;
 const ATTRIBUTE_INJECTION = /on[a-z0-9_]+\s*=/i;
 const CODE_HINT = /(?:alert|eval|function|document|window|xmlhttprequest|fetch)\s*\(/i;
+/** DOM property access such as `document.cookie`/`window.location` (after normalisation). */
+const DOM_REFERENCE = /\b(?:document|window)\s*\./i;
 
 export type PointUiPayload = Readonly<{
   component: string;
@@ -45,6 +47,7 @@ function checkValue(value: unknown, depth: number): void {
     if (FORBIDDEN_SCHEME.test(normalized)) bad('ui props must not contain executable URI schemes');
     if (ATTRIBUTE_INJECTION.test(normalized)) bad('ui props must not contain inline event handlers');
     if (CODE_HINT.test(normalized)) bad('ui props must not contain executable code');
+    if (DOM_REFERENCE.test(normalized)) bad('ui props must not reference the DOM');
     return;
   }
   if (Array.isArray(value)) {
