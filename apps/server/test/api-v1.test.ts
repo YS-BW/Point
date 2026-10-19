@@ -219,11 +219,20 @@ test('writes require Idempotency-Key and map it to requestId', async t => {
     method: 'POST', headers: {'idempotency-key': 'key-0003', ...JSON_HEADERS, ...AUTH}, body: '{"name":"x","requestId":"mine"}',
   });
   assert.equal(override.status, 400);
+  // Frozen minimum: 7 characters is rejected, 8 is accepted.
+  const short = await call(f, '/v1/chats', {
+    method: 'POST', headers: {'idempotency-key': '1234567', ...JSON_HEADERS, ...AUTH}, body: '{"name":"x"}',
+  });
+  assert.equal(short.status, 400);
+  const shortBody = await json(short);
+  assert.equal(shortBody.error?.code, 'INVALID_COMMAND');
+  assert.ok((shortBody.error?.message ?? '').includes('8..128'));
   const ok = await call(f, '/v1/chats', {
-    method: 'POST', headers: {'idempotency-key': 'key-0004', ...JSON_HEADERS, ...AUTH}, body: '{"name":"x"}',
+    method: 'POST', headers: {'idempotency-key': '12345678', ...JSON_HEADERS, ...AUTH}, body: '{"name":"x"}',
   });
   assert.equal(ok.status, 200);
-  assert.deepEqual(f.calls.find(entry => entry.name === 'chats.create')?.input, {name: 'x', requestId: 'key-0004'});
+  const createCalls = f.calls.filter(entry => entry.name === 'chats.create');
+  assert.deepEqual(createCalls.at(-1)?.input, {name: 'x', requestId: '12345678'});
 });
 
 test('same key and payload replay byte-identically; a different payload conflicts', async t => {
@@ -310,30 +319,30 @@ test('the full route table forwards to the matching application command', async 
   });
   const read = (path: string) => call(f, path, {headers: AUTH});
 
-  assert.equal((await write('/v1/chats', 'k-chat', {name: 'n'})).status, 200);
+  assert.equal((await write('/v1/chats', 'key-chat-01', {name: 'n'})).status, 200);
   assert.equal((await read('/v1/chats/1')).status, 200);
   assert.equal((await read('/v1/chats/2')).status, 404);
-  assert.equal((await write('/v1/chats/1/messages', 'k-send', {text: 'hi'})).status, 200);
-  assert.equal((await write('/v1/chats/1/stop', 'k-stop', {})).status, 200);
-  assert.equal((await write('/v1/chats/1/compact', 'k-compact', {instructions: 'tight'})).status, 200);
+  assert.equal((await write('/v1/chats/1/messages', 'key-send-01', {text: 'hi'})).status, 200);
+  assert.equal((await write('/v1/chats/1/stop', 'key-stop-01', {})).status, 200);
+  assert.equal((await write('/v1/chats/1/compact', 'key-compact-01', {instructions: 'tight'})).status, 200);
   assert.equal((await read('/v1/commands/100')).status, 200);
   assert.equal((await read('/v1/commands/missing')).status, 404);
   assert.equal((await read('/v1/chats/1/history?limit=10&cursor=c%201')).status, 200);
   assert.equal((await read('/v1/chats/1/history?limit=101')).status, 400);
-  assert.equal((await write('/v1/profile/remember', 'k-rem', {key: 'tone', value: '简洁', kind: 'preference', sourceChatId: '1'})).status, 200);
-  assert.equal((await write('/v1/profile/forget', 'k-forget', {key: 'tone'})).status, 200);
+  assert.equal((await write('/v1/profile/remember', 'key-remember-01', {key: 'tone', value: '简洁', kind: 'preference', sourceChatId: '1'})).status, 200);
+  assert.equal((await write('/v1/profile/forget', 'key-forget-01', {key: 'tone'})).status, 200);
   assert.equal((await read('/v1/profile')).status, 200);
   assert.equal(((await (await read('/v1/profile/export')).json()) as {markdown: string}).markdown, '# USER\n');
-  assert.equal((await write('/v1/jobs', 'k-job', {title: 't', prompt: 'p', sourceChatId: '1'})).status, 200);
-  assert.equal((await write('/v1/jobs/job-1/amend', 'k-amend', {expectedRevision: 1, prompt: 'p2'})).status, 200);
-  assert.equal((await write('/v1/jobs/job-1/cancel', 'k-cancel', {expectedRevision: 2})).status, 200);
+  assert.equal((await write('/v1/jobs', 'key-job-01', {title: 't', prompt: 'p', sourceChatId: '1'})).status, 200);
+  assert.equal((await write('/v1/jobs/job-1/amend', 'key-amend-01', {expectedRevision: 1, prompt: 'p2'})).status, 200);
+  assert.equal((await write('/v1/jobs/job-1/cancel', 'key-cancel-01', {expectedRevision: 2})).status, 200);
   assert.equal((await read('/v1/jobs/job-1')).status, 200);
   assert.equal((await read('/v1/jobs/job-2')).status, 404);
   assert.equal((await read('/v1/jobs/job-1/attempts')).status, 200);
   assert.equal((await read('/v1/artifacts/att%3Acall')).status, 200);
   assert.equal((await read('/v1/artifacts/other')).status, 404);
-  assert.equal((await write('/v1/followups', 'k-sched', {jobId: 'job-1', expectedRevision: 1, dueAt: 1000})).status, 200);
-  assert.equal((await write('/v1/followups/s-1/cancel', 'k-scancel', {})).status, 200);
+  assert.equal((await write('/v1/followups', 'key-schedule-01', {jobId: 'job-1', expectedRevision: 1, dueAt: 1000})).status, 200);
+  assert.equal((await write('/v1/followups/s-1/cancel', 'key-scancel-01', {})).status, 200);
   assert.equal((await read('/v1/followups/s-1')).status, 200);
   assert.equal((await read('/v1/followups/s-2')).status, 404);
   assert.equal((await read('/v1/followups/s-1/occurrences')).status, 200);
@@ -343,11 +352,11 @@ test('the full route table forwards to the matching application command', async 
   assert.equal((await read('/v1/deliveries/d-2')).status, 404);
 
   // Path ids are authoritative; a body copy is rejected instead of silently ignored.
-  assert.equal((await write('/v1/jobs/job-1/cancel', 'k-bind', {expectedRevision: 1, jobId: 'job-1'})).status, 400);
+  assert.equal((await write('/v1/jobs/job-1/cancel', 'key-bind-01', {expectedRevision: 1, jobId: 'job-1'})).status, 400);
   assert.deepEqual(f.calls.find(entry => entry.name === 'conversation.history')?.input,
     {chatId: '1', limit: 10, cursor: 'c 1'});
   assert.deepEqual(f.calls.find(entry => entry.name === 'conversation.send')?.input,
-    {text: 'hi', requestId: 'k-send', chatId: '1'});
+    {text: 'hi', requestId: 'key-send-01', chatId: '1'});
   assert.deepEqual(f.calls.find(entry => entry.name === 'followups.decisions')?.input, 'job-1');
   assert.equal(f.calls.find(entry => entry.name === 'jobs.artifact')?.input, 'att:call');
 });

@@ -142,7 +142,7 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 
 ### 幂等与请求约束
 
-- 所有写端点必须带 `Idempotency-Key`（`^[A-Za-z0-9._:-]{1,128}$`），HTTP 层把它映射为命令的 `requestId`；body 中出现 `requestId` 或路径参数同名键会被 400 拒绝（路由是唯一来源）。
+- 所有写端点必须带 `Idempotency-Key`（`^[A-Za-z0-9._:-]{8,128}$`，与冻结契约的 ≥8 字符一致；短于 8 字符返回 400 `INVALID_COMMAND`），HTTP 层把它映射为命令的 `requestId`；body 中出现 `requestId` 或路径参数同名键会被 400 拒绝（路由是唯一来源）。
 - 同 key 同 payload 的重放返回**逐字节相同**的成功响应：靠既有 Durable 收据，不缓存 HTTP 响应（不产生第二份事实）；同 key 异 payload → 409 `IDEMPOTENCY_CONFLICT`。
 - 请求体必须 `Content-Type: application/json`，严格 JSON object；上限 1 MiB，超过在读取时立即 413（不先全量缓冲）。空 body 的写端点按 `{}` 处理。
 - 每个响应带 `X-Request-Id`（可由请求头提供，非法则生成 UUID），错误信封内同样携带。
@@ -177,6 +177,13 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 | GET | `/v1/followups/deliveries?jobId=` | `followups.deliveries` |
 | GET | `/v1/deliveries/:deliveryId` | `deliveries.get` |
 | GET | `/inspect` | 门控诊断：`{version, instanceId, phase, capabilities}` |
+
+### 契约形状注意（WP4 审计非阻塞项，如实记录）
+
+- `/health/*` 的成功响应保持旧形状（`{phase, capabilities}`）；但 **404/405 等错误也走统一 JSON 信封**（`{error:{code,message,requestId}}`），相对旧实现的裸 `{code}` 是形状变化。
+- **404/405 先于鉴权**是刻意顺序：未知路径/方法在未配置或未认证的 server 上也返回 404/405，不暴露 `/v1` 是否存在；已知路由再进入鉴权（未配置 → 503，错误 Bearer → 401）。这一顺序由契约测试固定。
+- `/inspect` 返回 `{version, instanceId, phase, capabilities}`；**Durable 计数不在本片返回，留待 WP6 读模型**。默认 404，需 `POINT_API_INSPECT=1` 且通过 Bearer。
+- Node `clientError`（HTTP 层解析失败等 socket 级错误）由 Node 默认响应，可能**没有统一 JSON 信封**；应用可处理的 HTTP 请求才保证信封。该边界为已知限制，不作为 `/v1` 契约的一部分。
 
 ### 边界与未验证项
 
