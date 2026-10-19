@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@ag-ui/client": "1.0.3",
     "@ag-ui/core": "1.0.3",
     "@ag-ui/encoder": "1.0.3",
     "@earendil-works/chord": "1.3.0",
@@ -12,7 +11,7 @@
     "@earendil-works/pi-durable": "1.3.0",
     "zod": "3.25.76"
   },
-  "scripts": {
-    "cli": "node dist/src/cli.js"
+  "devDependencies": {
+    "@ag-ui/client": "1.0.3"
   }
 }

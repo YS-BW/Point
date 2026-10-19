@@ -2,7 +2,7 @@
 
 ## Purpose
 
-把一次前台运行投影为 AG-UI 1.0 事件流，使客户端（先 CLI，后 Web）能用同一套事件语义表达文本、工具、阶段、用量与取消；同时把 UI 扩展限制在声明式 `CUSTOM` 通道内，避免 UI 代码或第二事实源进入服务端。
+把一次前台运行投影为 AG-UI 1.0 事件流，使客户端（先 Web，WP13）能用同一套事件语义表达文本、工具、阶段、用量与取消；同时把 UI 扩展限制在声明式 `CUSTOM` 通道内，避免 UI 代码或第二事实源进入服务端。
 
 ## ADDED Requirements
 
@@ -92,7 +92,7 @@ Each SSE `data` line MUST contain exactly one JSON event, with no multi-event fr
 
 ### Requirement: Official client interoperability
 
-The edge MUST use pinned official SDK schemas and encoding. The reference CLI MUST use HttpAgent and reject malformed or truncated streams. Live provisional message IDs MUST be unique across runs; completed history MUST use stable Durable identities and replace provisional messages through an authoritative snapshot.
+The edge MUST use pinned official SDK schemas and encoding. Official-client interoperability MUST be proven by contract tests using the pinned `@ag-ui/client` `HttpAgent`; no reference CLI is required. Live provisional message IDs MUST be unique across runs; completed history MUST use stable Durable identities and replace provisional messages through an authoritative snapshot.
 
 #### Scenario: Consecutive dialogue
 - **WHEN** an official client completes two requests on the same thread
@@ -100,4 +100,4 @@ The edge MUST use pinned official SDK schemas and encoding. The reference CLI MU
 
 #### Scenario: EOF without terminal event
 - **WHEN** a stream ends before RUN_FINISHED or RUN_ERROR
-- **THEN** the CLI exits nonzero and does not claim that the underlying task failed or completed
+- **THEN** the official client contract test does not observe a completion claim and does not assert that the underlying task failed or completed

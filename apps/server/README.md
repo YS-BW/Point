@@ -251,7 +251,7 @@ const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, 
 
 ### 官方 SDK、消息身份与恢复边界
 
-边缘锁定 `@ag-ui/core/client/encoder@1.0.3`，输出先用官方 `EventSchema` 校验再编码；CLI 使用 `HttpAgent`。内部 runtime/application 不依赖 AG-UI。标准 `usage` 暂不发送：会话账本差分不能证明单次运行归属；内部累计账本不受影响。
+边缘锁定 `@ag-ui/core`/`@ag-ui/encoder`（`1.0.3`）做 wire 校验与编码，`zod@3.25.76` 提供 schema 依赖；`@ag-ui/client@1.0.3` 位于 devDependencies，只用于契约测试里以官方 `HttpAgent` 证明互操作。内部 runtime/application 不依赖 AG-UI。**首个产品客户端将是 Web（WP13）**，不再维护参考 CLI。标准 `usage` 暂不发送：会话账本差分不能证明单次运行归属；内部累计账本不受影响。
 
 流式草稿 ID 含观察流随机标识，跨请求不重复；落盘历史 ID 来自 Durable entry，多消息 entry 使用消息序号后缀。运行结束前发送 `MESSAGES_SNAPSHOT` 对账（上限为 10,000 条可见文本消息、8 MiB 原始历史项、1,000 页；超限显式要求重新同步，不发送不完整快照）。当前快照只覆盖现有可见文本历史，完整工具历史投影仍属 WP6。
 
@@ -263,7 +263,7 @@ onMessagesSnapshotEvent: ({event}) => ({messages: event.messages, stopPropagatio
 
 客户端待发送输入应保存在独立输入框草稿中，不能依赖消息视图保留本地未提交内容。`runId` 标识本次观察流；同一 `Idempotency-Key` 重试仍观察同一 Durable command，不再次执行。已完成命令可立即返回权威快照及终态；活动命令重试不保证补发丢失 token。
 
-断开 HTTP 只停止观察，停止任务仍须显式 stop。没有终止事件的 EOF、坏 JSON、已知事件坏值导致 CLI 非零退出。取消以 cancelled 呈现。持续有进展的流没有两分钟总时长限制；观察空闲超时返回 `OBSERVATION_TIMEOUT`，观察缓冲超限或 Durable resnapshot 返回 `OBSERVATION_RESYNC_REQUIRED`，均不代表执行失败、不取消或重放任务。完整重连订阅与 resnapshot 接续属 WP6。
+断开 HTTP 只停止观察，停止任务仍须显式 stop。没有终止事件的 EOF、坏 JSON、已知事件坏值由官方客户端契约测试断言：不声称完成（`RUN_FINISHED` 计数为 0），已知坏值被拒绝。取消以 cancelled 呈现。持续有进展的流没有两分钟总时长限制；观察空闲超时返回 `OBSERVATION_TIMEOUT`，观察缓冲超限或 Durable resnapshot 返回 `OBSERVATION_RESYNC_REQUIRED`，均不代表执行失败、不取消或重放任务。完整重连订阅与 resnapshot 接续属 WP6。
 
 ### `point.ui.*` CUSTOM 契约（仅占位，不渲染）
 
@@ -272,14 +272,11 @@ onMessagesSnapshotEvent: ({event}) => ({messages: event.messages, stopPropagatio
 - 有界：props 序列化 ≤2048 字节、深度 ≤4、key/数组 ≤32、字符串 ≤512 字符、必须 JSON-safe；**禁止** `<>`、`javascript:`、`data:` 等可在客户端执行的 HTML/JS/DOM 内容；`artifactId` 只允许受限标识符。
 - 服务端不解释渲染语义、不写 Durable UI 状态；任何声称"生成 UI 代码/HTML"的行为都不属于本契约。
 
-### 参考 CLI（协议第一个消费者）
+### 客户端与互操作
 
-```sh
-POINT_API_TOKEN=... npm run cli -w @point/server -- --message "你好"
-node apps/server/dist/src/cli.js --url http://127.0.0.1:4310 --token ... --chat 9 --message "继续"
-```
+首个产品客户端是 **Web（WP13）**；本片不再提供或要求参考 CLI。官方客户端互操作由契约测试覆盖：`apps/server/test/agui.test.ts` 使用 devDependency `@ag-ui/client@1.0.3` 的 `HttpAgent` 验证连续对话、同键重试不重复执行、未知事件容忍、已知坏值与截断流不被声称完成。
 
-打印 run/step/tool 摘要与文本增量、`[done] outcome=...`；`RUN_ERROR`、截断与协议错误以非零退出码结束。它是参考消费者，**不替换**原型 CLI。
+客户端策略仍然是服务端权威快照（见上）；Web 客户端需自行保存输入框草稿，不依赖消息视图保留未提交内容。
 
 ### 未验证 / 边界
 

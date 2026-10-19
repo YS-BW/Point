@@ -14,7 +14,7 @@
 
 **Non-Goals:**
 
-- 线程流、同步 run、`Last-Event-ID` 补发、`STATE_SNAPSHOT/DELTA`、`MESSAGES_SNAPSHOT`、`ACTIVITY`、运行流（WP6）。
+- 线程流、同步 run、`Last-Event-ID` 补发、`STATE_SNAPSHOT/DELTA`、完整消息/工具历史快照、增量订阅、`ACTIVITY`、运行流（WP6）。本片包含**有界**（10,000 条/8 MiB/1,000 页）的可见文本 `MESSAGES_SNAPSHOT` 作为终态对账，不是完整或可重连快照。
 - interrupt/resume 人工确认（WP7）。
 - 引入 CopilotKit 或任何前端运行时；不允许模型产出的 HTML/JS 进入事件或 Durable。
 - 多 run 并发塞进同一条流（AG-UI 要求同一流内 run 顺序）。
@@ -27,7 +27,7 @@
 4. **SSE 帧格式固定。** `data: <one JSON event>\n\n`，每帧一个事件；不使用 `event:` 语义；允许附带 `id: <seq>` 供 WP6 的重放使用（消费端忽略也不违反规范）。连接使用 `Cache-Control: no-store`、`Content-Type: text/event-stream`。
 5. **鉴权与访问日志复用 WP4。** `/v1/agent` 与 `/v1/*` 同一 Bearer、同一 fail-closed 503、同一访问日志白名单（不记录 body/Authorization）；流式请求只记录开始与结束状态，不记录 token 增量。
 6. **`point.ui.*` 只占位。** 定义命名空间、允许的 payload 形状（组件名 + 有界 props + 可选 artifact 引用）与白名单要求；**不实现**渲染。禁止在事件或 Durable 中存放 HTML/JS/任意 DOM；组件名必须由客户端预先注册，服务端不解释渲染语义。
-7. **参考 CLI 是第一个消费者。** `apps/server/src/cli.ts` 订阅 `POST /v1/agent` 并把事件打印为文本（含工具调用/阶段摘要），用于证明协议可消费；不覆盖原型 CLI，不引入交互式 UI 框架。
+7. **官方客户端契约测试是互操作证明。** 以 devDependency `@ag-ui/client` 的 `HttpAgent` 覆盖连续对话、重试、未知事件容忍与不完整流；首个产品客户端是 Web（WP13），不维护参考 CLI，不引入前端运行时。
 8. **不新增依赖。** SSE 用 Node 内置 `http`/`fetch`，事件序列化复用 WP4 的稳定序列化。
 
 ## Risks / Trade-offs
@@ -62,14 +62,14 @@
 | `TOOL_CALL_START` | `tool_execution_start`（toolCallId/toolName/args 已确定） | 可投影；`ARGS` 使用**一次完整 canonical JSON** 作为单个 delta（SDK 的 `toolcall_delta` 是 `path+delta` 结构，非原始 JSON 文本；不合成假的 token 分片） |
 | `TOOL_CALL_END` / `TOOL_CALL_RESULT` | `tool_execution_end` 的 `entry`（模型调用）或 `result`（嵌套调用）；结果文本从 entry/result 派生并做上限截断 | 可投影；嵌套调用带 `parentToolCallId` |
 | `STEP_STARTED/STEP_FINISHED` | `turn_start`/`turn_end` | 可投影；stepName 用真实回合序号（`turn-N`），不映射不存在的业务阶段 |
-| `RUN_FINISHED(outcome, usage)` | `run_end` + `submission.record` 结算（`done` vs `unanswered` 的 reason）+ 既有 `conversation.status(commandId)` 分类；usage = attach 时 `snapshot.usage` 到最后 `usage_changed` 的**会话 UsageState 差分**（按 model/tool bucket 汇总成 token 数） | 可投影；outcome=`success/cancelled`，失败走 `RUN_ERROR`；usage 是本次 run 的账本差分（非 provider 单次原始响应，注释写明派生口径） |
+| `RUN_FINISHED(outcome)` | `run_end` + `submission.record` 结算（`done` vs `unanswered` 的 reason）+ 既有 `conversation.status(commandId)` 分类 | 可投影；`outcome={type: success|cancelled}`，失败走 `RUN_ERROR`；**标准 `usage` 省略**（会话账本差分无法归属单次 run，内部账本仍在 Durable） |
 | `RUN_ERROR` | 受理/校验失败、`MODEL_NOT_CONFIGURED`、`CHAT_NOT_FOUND`、运行失败、已知字段坏值 | 可投影；固定 message + 既有稳定 code，不含栈/路径/凭据 |
 
 ### 明确**不投影**（能力不足或本片范围外，宁可不发也不伪造）
 
-- `REASONING_*`：SDK 有 `thinking_*`，但本片协议目标只覆盖文本/工具/阶段/usage，且 thinking 的可见性策略未定（留给后续片）。
+- `REASONING_*`：SDK 有 `thinking_*`，但本片协议目标只覆盖文本/工具/阶段/终态，且 thinking 的可见性策略未定（留给后续片）。
 - `TOOL_CALL_ARGS` 的**逐 token 分片**：公开 delta 是结构化 `path+delta`，不是 provider 原始 JSON 文本；只发一次完整 args，避免伪造分片。
-- `STATE_*`、`MESSAGES_SNAPSHOT`、`ACTIVITY_*`、`SUBAGENT_*`、`RAW`：WP6（读模型/线程流/后台运行流）范围，本片不发。
+- `STATE_*`、完整 `MESSAGES_SNAPSHOT`（本片只发有界可见文本终态快照）、`ACTIVITY_*`、`SUBAGENT_*`、`RAW`：WP6 范围（读模型/线程流/后台运行流），本片不发。
 - `Last-Event-ID` 重放、interrupt/resume：WP6/WP7；截断流按契约不补 `RUN_FINISHED`。
 - 后台任务进度（`taskGraph` 的 `phase`）不塞进前台 run 的 AG-UI 流（AG-UI 一流通多 run 必须顺序；后台进度属 WP6 `ACTIVITY`/运行流）。
 - `point.ui.*` CUSTOM：本片只冻结命名空间/校验契约（组件名、有界 props、可选 artifact 引用；拒绝 HTML/JS/DOM），**不生成**任何 UI 事件。
@@ -78,8 +78,8 @@
 
 `watchEvents`/`Harness` 属于 `@earendil-works/pi-durable`，按 `scripts/check-boundaries.mjs` 只能从 **runtime** lane import（api/application 禁止 SDK）。因此投影不能直接写在 `api/**`：需要 runtime 侧新增一个**中性事件端口**（不复用 AG-UI 类型，保持"内部模型不依赖 AG-UI"），由组合根注入 HTTP：
 
-- 新增 `apps/server/src/runtime/agui.ts`：消费 `watchEvents`，输出中性的 run 事件（message/text/tool/step/end+usage），把 SDK 的 commit 批次语义收敛为"一次 run 的流"；
-- `runtime/open.ts`：`Runtime` 增加该端口（如 `agent`），复用既有 `conversation.send`/`chat` 读模型与 `Harness.usage`；
+- 新增 `apps/server/src/runtime/agui.ts`：消费 `watchEvents`，输出中性的 run 事件（message/text/tool/step/end；标准 usage 省略），把 SDK 的 commit 批次语义收敛为"一次 run 的流"；
+- `runtime/open.ts`：`Runtime` 增加该端口（如 `agent`），复用既有 `conversation.send` 与 `conversation.history` 读模型；
 - `bootstrap.ts`：把 `runtime.agent` 注入 `createHttp`（与现有 `commands` 注入同一模式）。
 
 这三处超出 task-53 当前 writeScopes（仅 `api/**`、`cli.ts`、`apps/server/package.json`、`test/**`、`openspec/**`、`README.md`），按团队"跨 lane 先升级"规则**先报告 Lead 请求扩 scope**，获批后再实现。替代方案（把 SDK import 放进 api）违反 `AGENTS.md` 硬规则 #1/#9 与边界检查，不采用。
@@ -96,15 +96,15 @@
 ### SSE 与生命周期
 
 - 帧：`data: <一个 JSON 事件>\n\n`，每个块恰好一个事件；无 `event:` 语义、无多事件帧；本片不发 `id:`（WP6 再用于重放）。
-- 首帧：`RUN_STARTED` 或 `RUN_ERROR`；正常结束：`RUN_FINISHED`（`outcome: success|cancelled` + `usage`）；流内失败：`RUN_ERROR`（固定 message，不泄漏栈/路径/凭据）。
-- `protocolVersion: "1.0"` 随 `RUN_STARTED`/`RUN_FINISHED` 提供。
+- 首帧：`RUN_STARTED` 或 `RUN_ERROR`；正常结束：`RUN_FINISHED`（`outcome: {type: success|cancelled}`；标准 `usage` 省略）；流内失败：`RUN_ERROR`（固定 message，不泄漏栈/路径/凭据）。
+- `protocolVersion: "1.0"` 随 `RUN_STARTED` 提供（官方 schema 中可选，`RUN_FINISHED` 不重复）。
 - 截断（client `close`/服务端关闭）：**不发** `RUN_FINISHED`，不补实体关闭。
-- 取消（既有 `POST /v1/chats/:id/stop` 生效）：先关闭已开实体（`TEXT_MESSAGE_END`/`STEP_FINISHED`/`TOOL_CALL_END`），再发 `RUN_FINISHED` `outcome:"cancelled"`；停止命令本身语义不变。
-- 投影事件族与来源、以及"不投影清单"见 1.1 与 README（`REASONING_*`、逐 token tool args、STATE/MESSAGES/ACTIVITY/SUBAGENT/RAW、Last-Event-ID、interrupt/resume、后台 taskGraph 进度均不发）。
+- 取消（既有 `POST /v1/chats/:id/stop` 生效）：先关闭已开实体（`TEXT_MESSAGE_END`/`STEP_FINISHED`/`TOOL_CALL_END`），再发 `RUN_FINISHED` `outcome:{type:"cancelled"}`；停止命令本身语义不变。
+- 投影事件族与来源、以及"不投影清单"见 1.1 与 README（`REASONING_*`、逐 token tool args、STATE、完整 MESSAGES/ACTIVITY/SUBAGENT/RAW、Last-Event-ID、interrupt/resume、后台 taskGraph 进度均不发；有界可见文本 MESSAGES_SNAPSHOT 会发）。
 
-### usage 派生口径
+### usage 口径（官方兼容性纠偏后）
 
-`usage = {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalTokens}`，由 run 起止的**会话 `UsageState` 账本差分**按 model/tool bucket 汇总。**派生、按 bucket 聚合，不保证 provider 精确账单**（不拆单次调用、无 cost、retry/compaction 归属可能与账单不同）；列入未验证项。
+标准 `RUN_FINISHED.usage` **不发送**：会话 `UsageState` 账本差分无法证明单次 run 归属（retry/compaction/并发工具会让归属失真），发送汇总值会误导客户端。内部 Durable 账本不受影响；逐 run 精确 usage 属后续能力。
 
 ### `point.ui.*` CUSTOM（契约占位，无渲染）
 
@@ -113,22 +113,22 @@
 - 有界：props ≤2048 字节、深度 ≤4、key/数组 ≤32、字符串 ≤512、JSON-safe；禁止 `<>`/`javascript:`/`data:`/任意 HTML/JS/DOM；artifactId 受限标识符。
 - 服务端不解释渲染、不落 Durable UI 状态、不生成 UI 代码；无前端运行时依赖。
 
-### 参考 CLI
+### 客户端与互操作
 
-`apps/server/src/cli.ts` + `npm run cli -w @point/server`：创建/复用 chat、消费 SSE、打印 run/step/tool/文本与 `[done] outcome/usage`；`RUN_ERROR` 非零退出。不替换原型 CLI。
+官方 `HttpAgent` 仅作为**契约测试消费者**（devDependency），验证连续对话、同键重试不重复执行、未知事件容忍、已知坏值与不完整流不被声称完成。首个产品客户端是 Web（WP13）；本分支不包含参考 CLI。
 
 ## Migration Plan
 
-纯新增端点：不改变 `/v1` 既有路由与数据；回滚即移除 `/v1/agent` 路由或让参考 CLI 退回轮询（`GET /v1/commands/:id`）。无持久状态迁移。
+纯新增端点：不改变 `/v1` 既有路由与数据；回滚即移除 `/v1/agent` 路由（REST 轮询 `GET /v1/commands/:id` 仍在）。无持久状态迁移。
 
 ## Open Questions
 
-- 无未决事件粒度问题：1.1 已核查（见上），文本增量/工具调用/回合边界/usage 均可真实投影；参数流按"单次完整 args"投影，不伪造分片。
+- 无未决事件粒度问题：1.1 已核查（见上），文本增量/工具调用/回合边界/终态均可真实投影；参数流按"单次完整 args"投影，不伪造分片；标准 usage 不做单 run 归因。
 - 实现前待确认：runtime 中性事件端口的写范围（`runtime/agui.ts`、`runtime/open.ts`、`bootstrap.ts`），见"架构后果"；未获批前不实现投影。
 
 ## Approved correction (2026-10-19)
 
-The user approved the compatibility correction after review. This section supersedes the earlier no-dependency and wire-shape decisions: pin @ag-ui/core/client/encoder 1.0.3 at the edge; use official schemas/encoder and HttpAgent. Outcome is an object; omit standard usage until per-run attribution is reliable. Use unique provisional stream IDs and canonical Durable entry/message IDs in an authoritative messages snapshot at completion. CLI must reject incomplete streams. Observation timeout/overflow must not claim execution failure or replay work. Full reconnect subscription remains WP6. Scope includes api/agui, application stream port, runtime projection/history, CLI, boundary rules, tests, docs and lockfile, serially. No persistent schema change.
+The user approved the compatibility correction after review. This section supersedes the earlier no-dependency and wire-shape decisions: pin @ag-ui/core/encoder 1.0.3 (wire validation/encoding) and zod at the edge; move @ag-ui/client 1.0.3 to devDependencies for official-client contract tests. Outcome is an object; standard usage is omitted until per-run attribution is reliable. Use unique provisional stream IDs and canonical Durable entry/message IDs in an authoritative messages snapshot at completion. Official-client contract tests must reject or not claim completion for incomplete streams. Observation timeout/overflow must not claim execution failure or replay work. Full reconnect subscription remains WP6. First product client is Web (WP13); no reference CLI. Scope includes api/agui, application stream port, runtime projection/history, boundary rules, tests, docs and lockfile, serially. No persistent schema change.
 
 ### SDK compatibility details discovered during implementation
 

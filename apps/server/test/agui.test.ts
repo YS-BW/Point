@@ -1,6 +1,6 @@
 /**
  * WP5 AG-UI projection contract:
- * - first frame RUN_STARTED (or RUN_ERROR), normal close RUN_FINISHED(outcome+usage)
+ * - first frame RUN_STARTED (or RUN_ERROR), normal close RUN_FINISHED(outcome object)
  * - truncation (client close / server close) never fakes RUN_FINISHED
  * - cancellation closes open entities before outcome cancelled
  * - unknown events tolerated, invalid known fields/input fail closed
@@ -15,8 +15,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createModels } from '@earendil-works/pi-ai/models';
 import { fauxProvider, fauxAssistantMessage, type FauxResponseStep } from '@earendil-works/pi-ai/providers/faux';
@@ -470,22 +468,6 @@ test('real runtime: the existing stop command cancels the run and closes entitie
   assert.ok(events.every(event => event.type !== 'RUN_ERROR'));
 });
 
-test('reference CLI consumes the stream: text, tool/step summaries and success outcome', {timeout: 30000}, async t => {
-  const {base} = await realServer(t, [fauxAssistantMessage('CLI 收到回答。')]);
-  const child = spawn(process.execPath, [join(process.cwd(), 'apps/server/dist/src/cli.js'),
-    '--url', base, '--token', TOKEN, '--message', '你好 CLI'], {stdio: ['ignore', 'pipe', 'pipe']});
-  let stdout = '';
-  let stderr = '';
-  child.stdout.on('data', chunk => { stdout += String(chunk); });
-  child.stderr.on('data', chunk => { stderr += String(chunk); });
-  const [code] = await once(child, 'close') as [number];
-  assert.equal(code, 0, stderr);
-  assert.ok(stdout.includes('CLI 收到回答。'), stdout);
-  assert.ok(stdout.includes('[done] outcome=success'), stdout);
-  assert.ok(!stderr.includes('[error]'), stderr);
-});
-
-
 test('official client: consecutive dialogue reconciles drafts; retry does not execute again', {timeout: 20000}, async t => {
   const {base, runtime, faux} = await realServer(t, [fauxAssistantMessage('第一份方案'), fauxAssistantMessage('修改后的方案')]);
   const chatId = await createChat(base);
@@ -550,40 +532,106 @@ async function wireServer(t: TestContext, frames: string): Promise<string> {
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
-async function runCli(url: string): Promise<{code: number; stdout: string; stderr: string}> {
-  const child = spawn(process.execPath, [join(process.cwd(), 'apps/server/dist/src/cli.js'),
-    '--url', url, '--chat', '9', '--message', 'hello'], {
-      env: {...process.env, POINT_API_TOKEN: TOKEN}, stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  let stdout = '', stderr = '';
-  child.stdout.on('data', c => { stdout += String(c); });
-  child.stderr.on('data', c => { stderr += String(c); });
-  const [code] = await once(child, 'close') as [number];
-  return {code, stdout, stderr};
-}
-const startedFrame = 'data: {"type":"RUN_STARTED","threadId":"9","runId":"wire","protocolVersion":"1.0"}\n\n';
-for (const [name, tail] of [
-  ['empty EOF', ''],
-  ['partial reply', 'data: {"type":"TEXT_MESSAGE_START","messageId":"m","role":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"m","delta":"half"}\n\n'],
-  ['malformed JSON', 'data: {broken}\n\n'],
-  ['malformed JSON before completion', 'data: {broken}\n\ndata: {"type":"RUN_FINISHED","threadId":"9","runId":"wire","outcome":{"type":"success"}}\n\n'],
-  ['invalid known event', 'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":3,"delta":"bad"}\n\n'],
-] as const) {
-  test(`CLI rejects ${name} without claiming completion`, {timeout: 10000}, async t => {
-    const url = await wireServer(t, startedFrame + tail);
-    const result = await runCli(url);
-    assert.notEqual(result.code, 0);
-    assert.ok(!result.stdout.includes('[done]'), result.stdout);
-    assert.ok(!result.stderr.includes(TOKEN));
-  });
+
+function officialAgent(url: string): HttpAgent {
+  const agent = new HttpAgent({url, threadId: '9', headers: {...AUTH}});
+  agent.addMessages([{id: 'u-wire', role: 'user', content: 'hello'}]);
+  return agent;
 }
 
-test('official client tolerates unknown events but validates known output', async t => {
+const startedFrame = 'data: {"type":"RUN_STARTED","threadId":"9","runId":"wire","protocolVersion":"1.0"}\n\n';
+
+test('official client tolerates unknown events and still completes', async t => {
   const url = await wireServer(t, startedFrame + 'data: {"type":"FUTURE_EVENT","extra":true}\n\n' +
     'data: {"type":"RUN_FINISHED","threadId":"9","runId":"wire","outcome":{"type":"success"}}\n\n');
-  const result = await runCli(url);
-  assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.stdout.includes('[done] outcome=success'));
+  let finished = 0;
+  await officialAgent(url).runAgent({}, {onRunFinishedEvent: () => { finished += 1; }});
+  assert.equal(finished, 1);
+});
+
+test('official client rejects invalid known events', async t => {
+  const url = await wireServer(t, startedFrame +
+    'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":3,"delta":"bad"}\n\n');
+  await assert.rejects(officialAgent(url).runAgent({}, {}));
+});
+
+test('official client never claims completion for truncated or malformed streams', async t => {
+  const tails: readonly (readonly [string, string])[] = [
+    ['empty EOF', ''],
+    ['partial reply', 'data: {"type":"TEXT_MESSAGE_START","messageId":"m","role":"assistant"}\n\n' +
+      'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"m","delta":"half"}\n\n'],
+    ['malformed JSON', 'data: {broken}\n\n'],
+  ];
+  for (const [name, tail] of tails) {
+    const url = await wireServer(t, startedFrame + tail);
+    let finished = 0;
+    try {
+      await officialAgent(url).runAgent({}, {onRunFinishedEvent: () => { finished += 1; }});
+    } catch {
+      // Rejecting is acceptable; claiming RUN_FINISHED is not.
+    }
+    assert.equal(finished, 0, name);
+  }
+});
+
+test('OBSERVATION_TIMEOUT and OBSERVATION_RESYNC_REQUIRED map to a fixed RUN_ERROR and only stop observation', async t => {
+  for (const code of ['OBSERVATION_TIMEOUT', 'OBSERVATION_RESYNC_REQUIRED'] as const) {
+    let cancelled = 0;
+    const f = await serve(t, {
+      async start() {
+        return {
+          events: (async function* () {
+            yield {type: 'message_start', messageId: 'm-1'} as AgentRunEvent;
+            throw new Error(code);
+          })(),
+          cancel: async () => { cancelled += 1; },
+        };
+      },
+    });
+    const events: Record<string, unknown>[] = [];
+    for await (const event of readFrames(await postAgent(f, input()))) events.push(event);
+    const last = events.at(-1)!;
+    assert.equal(last.type, 'RUN_ERROR', code);
+    assert.equal(last.code, code);
+    assert.equal(last.message, 'Observation interrupted; execution status must be synchronized.');
+    assert.ok(!events.some(event => event.type === 'MESSAGES_SNAPSHOT'), 'no incomplete snapshot on resync');
+    assert.ok(!events.some(event => event.type === 'RUN_FINISHED'), 'observation end is not a finished run');
+    assert.equal(cancelled, 1, 'only observation is cancelled');
+  }
+});
+
+test('real runtime: over-limit messages snapshot fails observation without emitting an incomplete snapshot', {timeout: 20000}, async t => {
+  const {base, runtime, faux} = await realServer(t, [fauxAssistantMessage('快照超限。')]);
+  const chatId = await createChat(base);
+  const original = runtime.conversation.history;
+  const huge = Array.from({length: 10_001}, (_, index) => ({
+    id: `snap-${index}`, role: 'assistant' as const, text: 'x', interrupted: false,
+  }));
+  (runtime.conversation as {history: typeof original}).history = async () => ({items: huge});
+  const body = JSON.stringify({threadId: chatId, messages: [{id: 'u1', role: 'user', content: 'limit'}]});
+  try {
+    const response = await fetch(`${base}/v1/agent`, {
+      method: 'POST', headers: {'idempotency-key': 'snapshot-limit-1', ...JSON_HEADERS, ...AUTH}, body,
+    });
+    const events: Record<string, unknown>[] = [];
+    for await (const event of readFrames(response)) events.push(event);
+    assert.equal(events.at(-1)?.type, 'RUN_ERROR');
+    assert.equal(events.at(-1)?.code, 'OBSERVATION_RESYNC_REQUIRED');
+    assert.ok(!events.some(event => event.type === 'MESSAGES_SNAPSHOT'), 'incomplete page must not be sent as the snapshot');
+    assert.ok(!events.some(event => event.type === 'RUN_FINISHED'));
+  } finally {
+    (runtime.conversation as {history: typeof original}).history = original;
+  }
+  assert.equal(faux.state.callCount, 1, 'observation failure did not execute the model again');
+  // Execution continued: the same Durable command is answered and can be observed again.
+  const retry = await fetch(`${base}/v1/agent`, {
+    method: 'POST', headers: {'idempotency-key': 'snapshot-limit-1', ...JSON_HEADERS, ...AUTH}, body,
+  });
+  const retried: Record<string, unknown>[] = [];
+  for await (const event of readFrames(retry)) retried.push(event);
+  assert.deepEqual(retried.at(-1)?.outcome, {type: 'success'});
+  assert.ok(retried.some(event => event.type === 'MESSAGES_SNAPSHOT'));
+  assert.equal(faux.state.callCount, 1);
 });
 
 test('outbound schema rejects legacy terminal shapes', () => {
