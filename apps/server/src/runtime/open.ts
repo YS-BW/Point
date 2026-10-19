@@ -23,8 +23,10 @@ import { jobRuntime } from './jobs.js';
 import { jobToolsExtension, saveArtifactTool } from './tools.js';
 import type { DeliveryCommands, NotificationPort } from '../application/delivery.js';
 import type { FollowupCommands } from '../application/schedule.js';
+import { resourceCommands, type ResourceCommands } from '../application/resource.js';
 import { deliveryRuntime } from './deliveries.js';
 import { followupRuntime, type SessionDocumentScanner } from './schedules.js';
+import { durableResourceStore } from './resources.js';
 
 export type ModelBinding = {models: Models; model: ModelRef};
 export type OpenRuntimeOptions = {
@@ -38,6 +40,7 @@ export type Runtime = RuntimeHandle & {
   readonly jobs: JobCommands;
   readonly followups: FollowupCommands;
   readonly deliveries: DeliveryCommands;
+  readonly resources: ResourceCommands;
 };
 
 type StorageHandle = Awaited<ReturnType<typeof openNodeSqliteStorage>>;
@@ -95,6 +98,9 @@ export async function openRuntime(
     // Jobs/artifacts are wired only after the Harness exists: the artifact store and the job tools both need
     // committed document access. Installing the two extensions before any resume keeps attempt tasks resolvable.
     const workspace = join(dataDir, 'workspace');
+    // WP2: external resources persist in Durable documents (single commit CAS); the memory store
+    // remains test-only. Construction needs the open Harness, so it happens after Harness.open.
+    const resources = resourceCommands(durableResourceStore(harness), () => Date.now());
     const artifacts = artifactCommandsForHarness(harness, dataDir);
     const jobTools = jobToolsExtension(workspace);
     const saveArtifact = saveArtifactTool(workspace);
@@ -144,6 +150,7 @@ export async function openRuntime(
       jobs: jobs.commands,
       followups: schedules.commands,
       deliveries: deliveries.commands,
+      resources,
       closed: activeHarness.closed.then(() => undefined), close() {
         return closing ??= activeHarness.close(BACKGROUND_CONTEXT).finally(release);
       }};

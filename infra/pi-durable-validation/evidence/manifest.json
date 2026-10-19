@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T02-28-22.000000+00:00",
+  "generatedAt": "2026-10-19T04-17-20.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -154,6 +154,13 @@
       "bytes": 52542,
       "sha256": "1d12e33dced52738c0b38e0bc9cf6ab9f57c7380a69cd647e27fd0eeafe4aa2c",
       "source": "G1 skeleton readiness gate outputs",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp2-durable-resource-final.json",
+      "bytes": 53018,
+      "sha256": "e662e1bf76cd5a7bcc3114bee334b0937b68cf04278afebb1a002e5b3d1499b5",
+      "source": "WP2 Durable resource final acceptance commands",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

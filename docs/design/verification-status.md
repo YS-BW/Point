@@ -69,6 +69,16 @@
 
 完成边界：资源契约、内存桩、边界不变量与独立测试。**不是完整 WP2，也不是 G1 通过**。未实现/未验证：真实浏览器/文件/通知/网络 adapter；Durable 持久化、迁移与崩溃恢复；组合根接线与 HTTP 错误码映射；多进程/异步存储并发压测、真实 SIGKILL、长时间运行与费用。资源状态目前只在内存 store 中，不能用于真实数据。
 
+## WP2 Durable resource persistence（2026-10-19）
+
+官方窗口结果（具体时点与命令见 evidence）：根目录 `npm run check`、`npm run build` 与 `npm test` 通过：**176 项测试全部通过，0 fail / 0 skip**；targeted `resource-durable.test.js` **14/14**；服务端 166（既有 152 + Durable persistence 14）+ scripts 10。
+
+实现：`point.resource`、`point.resource-operation`、request index、command receipt 四个 Durable session family；nullable/present envelope、注入安全 request key、严格 JSON 转换与深拷贝；`durableResourceStore` 在单次 Harness.commit 内执行 CAS/receipt/index 全量校验，失败无 phantom doc，guard 写不递增 revision；`openRuntime.resources` 默认使用 Durable store；close/reopen 保留 lease/operation/unknown，unknown 不自动重放。
+
+证据：[WP2 Durable resource 最终验收](../../infra/pi-durable-validation/evidence/wp2-durable-resource-final.json)。
+
+**真实 adapter 尚未放行**：code audit 识别出 operation payload/hash、lease owner/expiry fence、attempt token、evidence-bound reconcile、symlink/TOCTOU、HTTP 分类/凭据、result bounds、abort/deadline 8 项 P0 契约缺口；这些已写入 [真实 adapter 契约](resource-adapters.md)，契约与回归测试完成前不得把真实文件/HTTP/CDP 接入生产。
+
 ## WP1b.2b 上下文/Profile/受保护压缩（2026-10-19）
 
 2026-10-19T01:54:21Z，根目录 `npm run check`、`npm run build` 与 `npm test` 通过：**102 项测试全部通过，0 fail / 0 skip**。构成：服务端既有 **74 项**（chats 7 + conversation-experience 11 + lifecycle 15 + resource 18 + resource-operations 23）+ 本片新增 **18 项**（profile 6 + context-budget 4 + compaction 8）+ `scripts/boundaries.test.mjs` **10 项**。targeted `node --test apps/server/dist/test/{profile,context-budget,compaction}.test.js` 为 **18/18**。

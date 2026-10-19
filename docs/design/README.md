@@ -36,6 +36,7 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 | [实施路线](roadmap.md) | 工作包（WP）与闸门、并行/串行规则、人机协作协议（不排时间） |
 | [Agent 层架构基调](agent-core.md) | 十条不变量、完成定义（DoD）、边界图与"坐稳"验收清单 |
 | [资源边界](resource-boundary.md) | WP2 资源租约、控制权 epoch、副作用三态与幂等/CAS 契约 |
+| [真实资源 Adapter](resource-adapters.md) | WP2 Durable resource persistence、文件/通知/CDP adapter 的安全契约与未验证边界 |
 | [上下文预算](context-budget.md) | WP1b.2b 上下文 sections、显式 Profile/USER.md 导出、受保护压缩 |
 | [Job/Attempt 与产物](jobs-and-artifacts.md) | WP1b.3 Job 与执行尝试、revision fence、save_artifact 工具与可核对产物 |
 | [计划与投递](plan-and-delivery.md) | WP1b.4 单次计划、可审计判断、会话投递与通知三态 |
