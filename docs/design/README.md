@@ -40,6 +40,8 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 | [上下文预算](context-budget.md) | WP1b.2b 上下文 sections、显式 Profile/USER.md 导出、受保护压缩 |
 | [Job/Attempt 与产物](jobs-and-artifacts.md) | WP1b.3 Job 与执行尝试、revision fence、save_artifact 工具与可核对产物 |
 | [计划与投递](plan-and-delivery.md) | WP1b.4 单次计划、可审计判断、会话投递与通知三态 |
+| [状态 v2 与迁移](state-v2.md) | WP3 格式闸门、v2 分片与派生索引、单 commit 迁移/备份/回滚、事件时间线与请求账本清扫 |
+| [HTTP API v1](api-v1.md) | WP4 `/v1` 路由、错误信封、幂等键、鉴权、访问日志与门控 inspect |
 | [客户端协议：AG-UI](protocol-agui.md) | 可行性、概念映射、自定义传输补齐断线与后台并发、落地顺序 |
 | [ADR-001 Agent 层选型](adr/ADR-001-agent-layer-selection.md) | 两次选型反转的时间线、依据、未量化项与复核触发条件 |
 | [当前 Durable 原型](../../infra/pi-durable-validation/README.md) | 可运行入口、CLI、故障注入与真实 Steel 验收 |

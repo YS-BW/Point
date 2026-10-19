@@ -22,4 +22,4 @@
 ## 4. Verification and docs
 
 - [x] 4.1 Update `apps/server/README.md` and OpenSpec spec with the frozen `/v1` shape, env vars, and non-goals.
-- [ ] 4.2 Run `npm run check`, `npm test`, targeted API contract tests, and prototype `POINT_CRASH_ROUNDS=1 npm test`; record evidence and unverified items.
+- [x] 4.2 Run `npm run check`, `npm test`, targeted API contract tests, and prototype `POINT_CRASH_ROUNDS=1 npm test`; record evidence and unverified items.

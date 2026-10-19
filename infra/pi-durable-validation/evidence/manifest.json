@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T05:25:00.000000+00:00",
+  "generatedAt": "2026-10-19T06:49:53.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -168,6 +168,13 @@
       "bytes": 2531,
       "sha256": "9037da6c1b52670986bee1757ea1cfafdb3ce3ff9a33c4f2ce4d946d0e9f291f",
       "source": "WP2 real adapter final gate commands and independent review",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp3-wp4-gate-2026-10-19T06-49-53Z.json",
+      "bytes": 5033,
+      "sha256": "a1d4a4976603f184174bed23640f6d319c0451d4a787d5c9a9b6ccb0e5aff6b8",
+      "source": "WP3 state v2/migration and WP4 API v1 gate commands, independent verification and audit",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

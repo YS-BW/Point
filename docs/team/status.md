@@ -43,3 +43,11 @@
 - `resource-adapter-integration`：**18/18**；原型 `POINT_CRASH_ROUNDS=1 npm test`：28/28；边界检查通过。
 - 安全评审：[final3](reviews/wp2-real-adapters-final3.md) 已批准；追加证据：[wp2-real-adapters-final](../../infra/pi-durable-validation/evidence/wp2-real-adapters-final-2026-10-19T05-25-00Z.json)。
 - 组合根仅显式注入 adapter effects；`unknown` 不自动重放。真实 Steel/CDP、RTC/viewer、多会话、旧库迁移、长跑/容量、真实 HTTP 查询核销与 artifact sink 集成仍未验证。
+
+## WP3 state v2 + WP4 API v1（2026-10-19）
+
+- 两个工作包在独立分支/worktree 并行完成：`wp/3-state-v2`（`406ed62`）、`wp/4-api-v1`（`18aefa9`），分别经独立动态验证（WP3 21/21、WP4 18/18+守卫矩阵）与独立代码审计（WP4 无 blocker；WP3 1 blocker 修复后复验）后合并进 main。
+- 根目录 `npm run check`、`npm test`：**302/302**；原型 `POINT_CRASH_ROUNDS=1 npm test`：28/28；两个 OpenSpec change strict 通过。
+- 审计/验证关闭的 blocker：profile 上限并发越界、迁移 engine 误报 already-migrated、cleanup 保护 TOCTOU、cleanup dryRun 预览不准确。
+- **闸门未过**：G2 需 WP4+WP5，G3 需 WP3+WP6；本轮只完成 WP3/WP4 工作包本身。
+- 未验证项（迁移与清扫、HTTP 层）见 [verification-status](../design/verification-status.md) 对应段落；证据：[wp3-wp4-gate](../../infra/pi-durable-validation/evidence/wp3-wp4-gate-2026-10-19T06-49-53Z.json)。

@@ -171,3 +171,29 @@
 本片闭合：runtime-owned registry 防替换、payload/evidence/result 绑定、owner/lease/epoch/attempt token 与 Delivery fencing、HTTP 分类及 redacted structured audit、file-outbox `unknown/outbox-written` 语义、文件与 artifact symlink/TOCTOU 硬化、CDP screenshot artifact 引用与 evaluate 元数据化脱敏。`unknown` 永不自动重放；真实 adapter 由组合根显式构造并注入，`openRuntime` 不自动创建 file root、CDP endpoint 或 notification target。
 
 未验证且不得外推：真实 Steel/生产 CDP 与 artifact sink 集成、RTC/viewer/浏览器侧多会话、旧 Durable 库迁移、数天/数周长跑与连接泄漏、凭据轮换/并发容量/Docker、真实 HTTP provider 查询核销与 exactly-once、外部 observer 的签名认证。v1 文档拒绝仍依赖 SDK 错误文案正则，作为后续 typed-error 改进项；本片不宣称真实 provider 已就绪。
+
+## WP3 状态 v2/迁移 与 WP4 API v1（2026-10-19）
+
+**范围**：WP3 状态格式闸门、v2 文档分片、单 commit 迁移（备份/幂等/SIGKILL）、`point.event` 时间线、请求账本清扫；WP4 `/v1` HTTP 契约（错误信封、幂等键、鉴权、访问日志、门控 inspect）。两者独立分支并行实现，回滚点分别是 `wp/3-state-v2`/`wp/4-api-v1` 分支头。
+
+| 证据项 | 数值 / 结果 | 证据 |
+|---|---|---|
+| 根目录全量 | `npm run check`、`npm test` 通过：**302 项通过，0 fail / 0 skip**（服务端 292 + scripts 10） | 本段命令输出；HEAD 合并提交 |
+| WP4 契约测试 | `api-v1` 13 + `api-v1-write-guards` 2 = **15/15**（含 5 并发同 key、11 写操作守卫矩阵） | `apps/server/test/api-v1*.test.ts` |
+| WP3 迁移/闸门/清扫 | `state-gate` 8 + `state-migration` 8 + `state-events` 1 + `state-cleanup` 7 + `profile-concurrency` 2 = **26/26** | `apps/server/test/state-*.test.ts`、`profile-concurrency.test.ts` |
+| 独立动态验证（WP4） | **18/18**，真实 `startServer` + 真实 SQLite + 原始 socket 驱动（413 非缓冲、重放逐字节、重启后重放、日志脱敏、`/inspect` 门控） | task-47 报告 |
+| 独立动态验证（WP3） | **21/21**，自建 v1 夹具库（含 unknown/attempting operation 与 6 类收据），真实 `migrateRuntime`/`openRuntime` | task-51 报告 |
+| 独立代码审计 | WP4 **通过（无 blocker）**；WP3 发现 1 blocker（profile 上限用陈旧计数）→ 已修复并复验 | [WP4 评审](../team/reviews/wp4-api-v1.md)、[WP3 评审](../team/reviews/wp3-state-v2.md) |
+| 原型回归 | `npm run check` + `POINT_CRASH_ROUNDS=1 npm test`：**28/28** | 本段命令输出 |
+| OpenSpec strict | `state-v2-migration`、`api-v1-contract` 均 valid | `openspec validate --strict` |
+
+**关闭的 blocker**：WP3 profile `MAX_PROFILE_ENTRIES` 并发越界（63 条后两并发 remember 到 65）→ 计数改为同一 commit 内判定；迁移 `engine/instanceId` 不匹配误报 `already-migrated` → 改为 `MIGRATION_INCOMPATIBLE` 零写入；cleanup 保护判定移入删除 commit；`dryRun` 预览改为与真实可删集合相等。
+
+**闸门状态**：**G2 未通过（需 WP4 + WP5）**，**G3 未通过（需 WP3 + WP6）**。本次只完成 WP3/WP4 两个工作包本身，不等于契约/状态闸门。
+
+**WP3 未验证项（不得据此外推"生产级迁移已安全"）**：(1) 语义等值用的 v1 fixture 由 SDK token 直接合成，非真实 v1 产品命令全链路生成的库，真实旧库脏数据未覆盖；(2) 备份失败分支仅有代码审查，备份保留策略/旧备份清理未实现；(3) 清扫仅验证 `keepMs=0/keepCount=0` 场景，默认 30 天窗口、最近 keepCount 窗口、单次 1000 上限与大批量分页未压测；(4) 真实大库迁移耗时、在线备份磁盘峰值、事件规模未压测（WP9）；(5) 仅单进程：迁移要求停写窗口与目录单写者锁，不支持多进程/在线热迁移；(6) "只读模式"是产品层 commit/resume guard，SDK 无公开 read-only storage，SQLite/WAL 仍可能文件级写入，不是 OS 级只读；(7) SIGKILL 用确定性 beforeCommit/afterCommit hook，未覆盖指令级随机时机与断电/磁盘满；(8) profile 上限并发仅验证单进程 2 并发，未验证多写入者；(9) 事件是**部分可重建**派生物：`rebuildEvents()` 只重建当前快照，不恢复历史变迁，历史时间线不可精确重放；(10) cleanup 并发注入为确定性单次提交，未做随机交错压测。
+
+**WP4 未验证项 / 已知边界**：`/health` 的 404/405 错误体改走统一信封（形状变化，已在 README 记录）；404/405 先于鉴权是刻意顺序；`/inspect` 只返回 `{version,instanceId,phase,capabilities}`，Durable 计数留 WP6；Node `clientError` 可能无信封；未测跨进程并发压测、HTTPS 终止/反向代理、限流与审计留存、真实模型/外部 adapter 组合的端到端（HTTP 层不调用模型，未绑定 provider 时 `send` 映射 503）。另：一次全量运行中出现过 1 项瞬时失败（并发的 WP3 worktree 全量运行），随后同树重跑 287/287 全绿且未复现，归为高负载下时序敏感，不作为通过依据也不隐藏。
+
+证据：`infra/pi-durable-validation/evidence/wp3-wp4-gate-<ts>.json`（追加式，manifest 登记）。
+

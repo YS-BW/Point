@@ -25,8 +25,8 @@
 
 ## 5. Verification and docs
 
-- [ ] 5.1 Update `docs/design/**` (state shape, migration/rollback procedure, retention policy) and `apps/server/README.md`.
+- [x] 5.1 Update `docs/design/**` (state shape, migration/rollback procedure, retention policy) and `apps/server/README.md`.
   - [x] docs/design/state-v2.md added; apps/server/README.md is outside this task's write scope (report to Lead).
-- [ ] 5.2 Run `npm run check`, full `npm test`, targeted migration suites, and prototype `POINT_CRASH_ROUNDS=1 npm test`; record evidence with explicit unverified items.
+- [x] 5.2 Run `npm run check`, full `npm test`, targeted migration suites, and prototype `POINT_CRASH_ROUNDS=1 npm test`; record evidence with explicit unverified items.
   - [x] `npm run check` + `npm test` 280/280 + targeted state/migration suites green in the WP3 worktree.
-  - [ ] Prototype quick regression: `infra/pi-durable-validation` has no node_modules in this worktree (root `npm ci` only installs workspaces); not run.
+  - [x] Prototype quick regression: run on the merged main checkout (`POINT_CRASH_ROUNDS=1 npm test`, 28/28); the branch worktree has no prototype node_modules.
