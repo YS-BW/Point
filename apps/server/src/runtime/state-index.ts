@@ -19,7 +19,10 @@ export async function writeChatIndex(
   const entry: ChatIndexEntry = {
     id: chat.id, name: chat.name, revision: 0, createdAt: chat.createdAt, updatedAt,
   };
-  await tx.doc(ChatsIndex, chat.id, entry);
+  // `tx.doc` with a seed only initializes a *new* family member: for an existing document the SDK
+  // loads the committed value and ignores the seed, so the returned draft is the only way to write an
+  // update. Mutating it keeps the derived index in step with the entity it mirrors.
+  Object.assign(await tx.doc(ChatsIndex, chat.id, entry), entry);
 }
 
 export async function writeJobIndex(
@@ -28,7 +31,7 @@ export async function writeJobIndex(
   const entry: JobIndexEntry = {
     id: job.id, revision: job.revision, status: job.status, updatedAt: job.updatedAt,
   };
-  await tx.doc(JobsIndex, job.id, entry);
+  Object.assign(await tx.doc(JobsIndex, job.id, entry), entry);
 }
 
 export async function writeResourceIndex(tx: Tx, resource: Readonly<ResourceValue>): Promise<void> {
@@ -41,7 +44,7 @@ export async function writeResourceIndex(tx: Tx, resource: Readonly<ResourceValu
     leaseExpiresAt: resource.lease === null ? null : resource.lease.expiresAt,
     updatedAt: Date.now(),
   };
-  await tx.doc(ResourcesIndex, resource.id, entry);
+  Object.assign(await tx.doc(ResourcesIndex, resource.id, entry), entry);
 }
 
 export type ReceiptIndexInput = Readonly<{
@@ -68,5 +71,5 @@ export async function indexReceipt(tx: Tx, input: ReceiptIndexInput): Promise<vo
     terminal: input.terminal,
     createdAt,
   };
-  await tx.doc(RequestsIndex, key, entry);
+  Object.assign(await tx.doc(RequestsIndex, key, entry), entry);
 }

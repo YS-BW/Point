@@ -11,6 +11,13 @@ const encoder = new EventEncoder({accept: 'text/event-stream'});
 export function sseFrame(event: AguiEvent): string {
   return encoder.encodeSSE(EventSchema.parse(event) as Event);
 }
+/**
+ * Frame with an SSE `id:` field carrying the frame-level cursor. The official encoder emits only
+ * `data:`; the id line is part of the custom thread-stream binding, and standard consumers ignore it.
+ */
+export function sseFrameWithId(cursor: string, event: AguiEvent): string {
+  return `id: ${cursor}\n${sseFrame(event)}`;
+}
 export function isAguiEvent(value: unknown): value is AguiEvent {
   return EventSchema.safeParse(value).success;
 }

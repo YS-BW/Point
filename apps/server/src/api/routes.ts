@@ -13,15 +13,26 @@ import type { ProfileCommands } from '../application/profile.js';
 import type { FollowupCommands } from '../application/schedule.js';
 import type { HealthReader } from '../application/ports.js';
 import type { AgentRunPort } from '../application/agent-stream.js';
-import { ApiError } from './errors.js';
+import type { ReadModelPort } from '../application/read-model.js';
+import type { ThreadStreamPort } from '../application/thread-stream.js';
+import type { RunStreamPort } from '../application/run-stream.js';
+import { ApiError, messageFor } from './errors.js';
 import { idempotencyKey } from './idempotency.js';
 import { readJsonObject, type BodyCounter } from './json.js';
 import { agentRoute } from './agui/route.js';
+import { threadStreamRoute } from './agui/thread-stream.js';
+import { runStreamRoute } from './agui/run-stream.js';
 
 export type ApiRuntime = Readonly<{
   instanceId: string;
   /** WP5 AG-UI projection port; absent means `POST /v1/agent` is RUNTIME_NOT_READY. */
   agent?: AgentRunPort;
+  /** WP6 derived read model; absent means `/v1/state` is RUNTIME_NOT_READY. */
+  readModel?: ReadModelPort;
+  /** WP6 thread stream; absent means the stream route is RUNTIME_NOT_READY. */
+  threadStream?: ThreadStreamPort;
+  /** WP6 run observation stream; absent means the route is RUNTIME_NOT_READY. */
+  runStream?: RunStreamPort;
   chats: ChatCommands;
   conversation: ConversationCommands;
   profile: ProfileCommands;
@@ -52,7 +63,7 @@ export type RestRoute = Readonly<{
 
 /** Streaming routes own the response (headers, SSE frames, client-disconnect handling). */
 export type StreamRoute = Readonly<{
-  method: 'POST';
+  method: 'GET' | 'POST';
   segments: readonly string[];
   stream: true;
   handle(context: RouteContext, response: import('node:http').ServerResponse): Promise<void>;
@@ -97,6 +108,16 @@ function notFound(code: string): never {
 
 export function v1Routes(): readonly Route[] {
   const routes: RestRoute[] = [
+    // Derived read model (WP6). GET, so no Idempotency-Key is required.
+    {
+      method: 'GET', segments: ['v1', 'state'],
+      async handle({commands}) {
+        const readModel = commands.readModel;
+        if (readModel === undefined) throw new ApiError(503, 'RUNTIME_NOT_READY', messageFor('RUNTIME_NOT_READY'));
+        return readModel.state();
+      },
+    },
+
     // Chats and conversation.
     {
       method: 'POST', segments: ['v1', 'chats'],
@@ -259,5 +280,5 @@ export function v1Routes(): readonly Route[] {
       },
     },
   ];
-  return [...routes, agentRoute()];
+  return [...routes, agentRoute(), threadStreamRoute(), runStreamRoute()];
 }

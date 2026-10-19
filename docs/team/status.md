@@ -6,14 +6,16 @@
 
 | 项 | 状态 |
 |---|---|
-| 分支 | `wp/2-real-adapters` |
-| G1 | 已通过（WP1a + WP1b 五片 + WP2 contract/memory 出口） |
+| 分支 | `main` |
+| 闸门 | G1 通过、G2 通过（官方 client 契约测试口径）、**G3 通过**（WP3 迁移可回滚 + WP6 增量/重连独立验证 20/20） |
+| WP6 | **已交付**：读模型 + 增量事件 + 线程流 + 运行流；根目录 352/352，独立动态验证 20/20，代码审计 blocker 清零 |
 | WP2 Durable persistence | **完成**：`Runtime.resources` 默认真实 Durable store，官方 176/176 |
 | WP2 real adapters | **完成安全闸门**：18/18 adversarial、服务端 261/261、独立 final3 评审通过；真实 Steel/RTC/provider 仍未验证 |
 | Lead | lead |
-| 实现 | resource-impl（Durable store已完成，下一片负责P0/adapter） |
-| 测试 | senior-tester（resource-durable 14/14 官方） |
-| 审计 | code-auditor（P0-1..8 安全审计已完成） |
+| 实现 | lead（WP6 分片 6.1/6.2/6.3/6.4） |
+| 代码审查 | code-reviewer（WP6.1/6.2/6.3/6.4 增量审计，已收尾） |
+| 测试 | tester（verify/** 独立动态验证，进行中） |
+| 产品审核 | product-reviewer（口径一致性与文档漂移） |
 
 ## Durable persistence 验收
 

@@ -140,6 +140,8 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 | 503 | `API_NOT_CONFIGURED`、`RUNTIME_NOT_READY`、`MODEL_NOT_CONFIGURED`、`NOTIFICATION_NOT_CONFIGURED`、`DATA_DIR_BUSY` |
 | 500 | `INTERNAL_ERROR`（固定 message，不含栈/路径/凭据；未知异常一律归入） |
 
+WP6 新增稳定码：`TOO_MANY_STREAMS`(503，超过每进程 64 个流)、`RUN_NOT_FOUND`(404)、`OBSERVATION_TIMEOUT`(503，观察空闲超时)、`OBSERVATION_RESYNC_REQUIRED`(503，观察缓冲溢出或读模型无法取得一致快照)、`CHAT_NOT_FOUND`(404)。`RUN_FAILED` 仅作为 SSE `RUN_ERROR.code` 出现，不参与 HTTP 信封。`GET /v1/state` 在**持续高频写入**下可能以 503 `OBSERVATION_RESYNC_REQUIRED` 结束（整轮重扫最多 4 轮，仍不一致时显式失败而不返回混合时间点的旧快照），客户端重试即可。
+
 ### 幂等与请求约束
 
 - 所有写端点必须带 `Idempotency-Key`（`^[A-Za-z0-9._:-]{8,128}$`，与冻结契约的 ≥8 字符一致；短于 8 字符返回 400 `INVALID_COMMAND`），HTTP 层把它映射为命令的 `requestId`；body 中出现 `requestId` 或路径参数同名键会被 400 拒绝（路由是唯一来源）。
@@ -176,18 +178,21 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 | GET | `/v1/followups/decisions?jobId=` | `followups.decisions` |
 | GET | `/v1/followups/deliveries?jobId=` | `followups.deliveries` |
 | GET | `/v1/deliveries/:deliveryId` | `deliveries.get` |
-| GET | `/inspect` | 门控诊断：`{version, instanceId, phase, capabilities}` |
+| GET | `/v1/state` | WP6 派生读模型（GET，不需要 `Idempotency-Key`） |
+| GET | `/v1/threads/:threadId/stream` | WP6 线程流（自定义 SSE，帧 `id` 为 `<commitSeq>:<frameIndex>`） |
+| GET | `/v1/runs/:runId/stream` | WP6 后台执行观察流（`runId` = Durable task id） |
+| GET | `/inspect` | 门控诊断：`{version, instanceId, phase, capabilities, counts, countsTruncated}` |
 
 ### 契约形状注意（WP4 审计非阻塞项，如实记录）
 
 - `/health/*` 的成功响应保持旧形状（`{phase, capabilities}`）；但 **404/405 等错误也走统一 JSON 信封**（`{error:{code,message,requestId}}`），相对旧实现的裸 `{code}` 是形状变化。
 - **404/405 先于鉴权**是刻意顺序：未知路径/方法在未配置或未认证的 server 上也返回 404/405，不暴露 `/v1` 是否存在；已知路由再进入鉴权（未配置 → 503，错误 Bearer → 401）。这一顺序由契约测试固定。
-- `/inspect` 返回 `{version, instanceId, phase, capabilities}`；**Durable 计数不在本片返回，留待 WP6 读模型**。默认 404，需 `POINT_API_INSPECT=1` 且通过 Bearer。
+- `/inspect` 返回 `{version, instanceId, phase, capabilities, counts, countsTruncated}`；`counts` 键固定为 `chats/jobs/attempts/resources/resourceOperations/memory/events/schedules/occurrences/decisions/deliveries/artifacts/requests`（只数实体族），当前计数精确、`countsTruncated` 恒为 `false`。默认 404，需 `POINT_API_INSPECT=1` 且通过 Bearer。
 - Node `clientError`（HTTP 层解析失败等 socket 级错误）由 Node 默认响应，可能**没有统一 JSON 信封**；应用可处理的 HTTP 请求才保证信封。该边界为已知限制，不作为 `/v1` 契约的一部分。
 
 ### 边界与未验证项
 
-成功响应不做外层包装、无分页游标之外的读模型；`/inspect` 只报 server 身份/阶段，**Durable 计数依赖尚未实现的读模型（WP6）**。AG-UI/SSE 见下文 WP5；不实现多租户/OAuth/限流、批量或删除类端点。`/v1` 与真实模型/外部端点组合的端到端行为取决于 `openRuntime` 绑定与注入的 adapters；HTTP 层本身不使用模型。未验证：跨进程并发压测、真实客户端重连（属 WP5/WP6）、HTTPS 终止与反向代理、限流与审计留存。
+成功响应不做外层包装；`GET /v1/state` 提供派生读模型（各 family 以 id 为键、有界并在超限时带 `truncated` 标记），`/inspect` 的 Durable 计数为 O(总文档数) 的诊断扫描。AG-UI/SSE 见下文 WP5；不实现多租户/OAuth/限流、批量或删除类端点。`/v1` 与真实模型/外部端点组合的端到端行为取决于 `openRuntime` 绑定与注入的 adapters；HTTP 层本身不使用模型。未验证：跨进程并发压测、真实客户端重连（属 WP5/WP6）、HTTPS 终止与反向代理、限流与审计留存。
 
 ## 状态 v2 与迁移（WP3）
 

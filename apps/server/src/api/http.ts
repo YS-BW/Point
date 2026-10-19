@@ -134,8 +134,13 @@ export function createHttp(options: HttpOptions): Server {
       }
       if (options.commands === undefined) throw new ApiError(503, 'RUNTIME_NOT_READY', messageFor('RUNTIME_NOT_READY'));
       const status = options.health.status();
+      // WP6: Durable counts, the field WP4 explicitly deferred to this work package. A read model
+      // that is absent (foundation-only runtime) keeps the response shape without counts.
+      const counts = options.commands.readModel === undefined
+        ? undefined : await options.commands.readModel.counts();
       await respond(response, 200, {
         version: 1, instanceId: options.commands.instanceId, phase: status.phase, capabilities: status.capabilities,
+        ...(counts === undefined ? {} : {counts: counts.counts, countsTruncated: counts.truncated}),
       });
       return 200;
     }
