@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
@@ -10,6 +11,7 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import { openRuntime } from '../src/runtime/open.js';
 import { indexReceipt } from '../src/runtime/state-index.js';
 import { CreateChatReceipts } from '../src/storage/chats.js';
+import { ProfileReceipts } from '../src/storage/profile.js';
 import { Attempts, JobCommandReceipts, Jobs } from '../src/storage/job.js';
 import type { Job } from '../src/domain/job.js';
 import type { Attempt } from '../src/domain/job.js';
@@ -242,5 +244,107 @@ test('a read-only runtime refuses receipt cleanup with READ_ONLY', {timeout: 300
     try {
       await assert.rejects(reader.cleanupReceipts({keepMs: 0, keepCount: 0}), /READ_ONLY/);
     } finally { await reader.close(); }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+
+function nextSeq(dir: string): number {
+  const db = new DatabaseSync(join(dir, 'state.sqlite'), {readOnly: true});
+  try {
+    const row = db.prepare('SELECT next_seq AS seq FROM durable_metadata WHERE singleton = 1').get() as {seq: number};
+    return row.seq;
+  } finally { db.close(); }
+}
+
+test('dryRun preview equals the real removable set and performs zero writes', {timeout: 30000}, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'point-cleanup-dryrun-'));
+  try {
+    const runtime = await openRuntime(dir);
+    await runtime.close();
+    const old = 0;
+    await inspect(dir, async harness => {
+      await harness.commit(async tx => {
+        // Three old terminal receipts that the real run may remove.
+        for (const requestId of ['dry-chat-1', 'dry-chat-2']) {
+          await tx.doc(CreateChatReceipts, requestId, 'name');
+          await indexReceipt(tx, {
+            family: 'point.command.chat-create', receiptKey: requestId, terminal: true, createdAt: old,
+          });
+        }
+        await tx.doc(ProfileReceipts, 'dry-profile', 'fp');
+        await indexReceipt(tx, {
+          family: 'point.command.profile', receiptKey: 'dry-profile', terminal: true, createdAt: old,
+        });
+
+        // Active job receipt.
+        const activeJob: Job = {
+          id: 'job-dry-active', title: 'active', prompt: 'p', requirements: [], revision: 1, status: 'running',
+          sourceChatId: '2', executionChatId: '9', currentAttemptId: null,
+          result: null, artifactId: null, error: null, createdAt: 1, updatedAt: 2,
+        };
+        await tx.doc(Jobs, activeJob.id, activeJob);
+        const jobReceipt = await tx.doc(JobCommandReceipts, 'dry-job', 'fp-job');
+        jobReceipt.result = {jobId: activeJob.id, revision: 1, attemptId: 'job-dry-active-1'};
+        await indexReceipt(tx, {
+          family: 'point.command.job', receiptKey: 'dry-job', referencedId: activeJob.id, terminal: false, createdAt: old,
+        });
+
+        // Active schedule receipt.
+        const activeSchedule: Schedule = {
+          id: 'schedule-dry-active', jobId: 'job-1', revision: 1, sourceChatId: '2', status: 'active',
+          occurrenceIds: [], createdAt: 1, updatedAt: 1,
+        };
+        await tx.doc(Schedules, activeSchedule.id, activeSchedule);
+        const followupReceipt = await tx.doc(FollowupCommandReceipts, 'dry-followup', 'fp-followup');
+        followupReceipt.result = {scheduleId: activeSchedule.id, status: 'active'};
+        await indexReceipt(tx, {
+          family: 'point.command.followup', receiptKey: 'dry-followup', referencedId: activeSchedule.id,
+          terminal: false, createdAt: old,
+        });
+
+        // Unresolved resource operation receipt.
+        const key = resourceRequestKey('browser:primary', 'dry-resource');
+        const resourceReceipt = await tx.doc(ResourceCommandReceipts, key, ABSENT_COMMAND);
+        resourceReceipt.present = true;
+        resourceReceipt.fingerprint = 'fp-resource';
+        resourceReceipt.result = {id: 'op-dry-unknown'} as JsonObject;
+        await tx.doc(ResourceOperations, 'op-dry-unknown', {
+          present: true,
+          value: {
+            id: 'op-dry-unknown', requestId: 'dry-resource', resourceId: 'browser:primary', controlEpoch: 1,
+            state: 'unknown', revision: 2, fingerprint: 'fp', result: null, observation: 'lost',
+            owner: 'owner-a', effect: {kind: 'browser.navigate', payload: {url: 'https://example.com'}, payloadHash: 'h'},
+            attemptToken: 'tok', attemptStartedAt: 1, deadline: 2, evidence: null, observer: null,
+          },
+        });
+        await indexReceipt(tx, {
+          family: 'point.resource-command', receiptKey: key, referencedId: 'browser:primary',
+          terminal: false, createdAt: old,
+        });
+      }, context);
+    });
+
+    const runtime2 = await openRuntime(dir);
+    try {
+      const before = nextSeq(dir);
+      const dry = await runtime2.cleanupReceipts({keepMs: 0, keepCount: 0, dryRun: true, now: () => Date.now() + 1_000});
+      assert.equal(nextSeq(dir), before, 'dry-run must not commit any write');
+      assert.equal(dry.removed, 0);
+      assert.ok((dry.reasons['active'] ?? 0) >= 1, JSON.stringify(dry.reasons));
+      assert.ok((dry.reasons['unknown'] ?? 0) >= 1, JSON.stringify(dry.reasons));
+      assert.equal(dry.removedKeys.length, 3, JSON.stringify(dry.removedKeys));
+      for (const protectedKey of [
+        requestIndexKey('point.command.job', 'dry-job'),
+        requestIndexKey('point.command.followup', 'dry-followup'),
+        requestIndexKey('point.resource-command', resourceRequestKey('browser:primary', 'dry-resource')),
+      ]) {
+        assert.equal(dry.removedKeys.includes(protectedKey), false, `dry-run must not preview protected ${protectedKey}`);
+      }
+
+      const real = await runtime2.cleanupReceipts({keepMs: 0, keepCount: 0, now: () => Date.now() + 1_000});
+      assert.deepEqual([...dry.removedKeys].sort(), [...real.removedKeys].sort(),
+        'dry-run preview must equal the real removable set');
+      assert.equal(real.removed, 3);
+    } finally { await runtime2.close(); }
   } finally { await rm(dir, {recursive: true, force: true}); }
 });

@@ -357,6 +357,52 @@ async function protectionInTx(tx: Tx, candidate: Readonly<Candidate>): Promise<s
   return 'unindexed';
 }
 
+/**
+ * Read-only mirror of `protectionInTx` for the dry-run preview. It reads the committed snapshots (no write,
+ * no commit) so the preview lists exactly the receipts a real run would remove in the same state.
+ */
+async function protectionReadOnly(harness: Harness, candidate: Readonly<Candidate>): Promise<string | undefined> {
+  const {entry} = candidate;
+  if (entry.family === 'point.command.chat-create' || entry.family === 'point.command.profile') return undefined;
+  if (entry.family === 'point.conversation.command' || entry.family === 'point.command.compact') {
+    const taskId = candidate.receipt.taskId;
+    if (typeof taskId !== 'number' || !Number.isSafeInteger(taskId) || taskId <= 0) return 'referenced';
+    const task = await harness.getTask(taskId as TaskId, context);
+    return task === undefined || task.state.status === 'terminal' ? undefined : 'attempting';
+  }
+  if (entry.family === 'point.command.job') {
+    if (candidate.job === undefined) return 'referenced';
+    const jobId = typeof candidate.job.id === 'string' ? candidate.job.id : undefined;
+    if (jobId === undefined) return 'referenced';
+    const job = await harness.snapshot(Jobs, jobId, context);
+    if (job === undefined) return 'referenced';
+    if (job.status === 'queued' || job.status === 'running') return 'active';
+    if (job.currentAttemptId === null) return undefined;
+    const attempt = await harness.snapshot(Attempts, job.currentAttemptId, context);
+    return attempt !== undefined && (attempt.status === 'queued' || attempt.status === 'running')
+      ? 'attempting' : undefined;
+  }
+  if (entry.family === 'point.command.followup') {
+    const scheduleId = resultOf(candidate.receipt)?.scheduleId;
+    if (typeof scheduleId !== 'string') return 'referenced';
+    if (candidate.schedule === undefined) return undefined;
+    const schedule = await harness.snapshot(Schedules, scheduleId, context);
+    return schedule?.status === 'active' ? 'active' : undefined;
+  }
+  if (entry.family === 'point.resource-command') {
+    const resourceId = resourceIdFromReceiptKey(entry.receiptKey);
+    if (resourceId === undefined) return 'referenced';
+    const operationId = resultOf(candidate.receipt)?.id;
+    if (typeof operationId !== 'string') return undefined;
+    const operation = await harness.snapshot(ResourceOperations, operationId, context);
+    const state = operation?.value?.state;
+    if (state === 'attempting') return 'attempting';
+    if (state === 'unknown') return 'unknown';
+    return undefined;
+  }
+  return 'unindexed';
+}
+
 let cleanupChain: Promise<unknown> = Promise.resolve();
 
 /**
@@ -419,9 +465,21 @@ async function cleanupOnce(
   }
 
   if (options.dryRun) {
+    // The preview applies the same protection rules read-only: it must equal the real removable set.
+    const preview: string[] = [];
+    for (const candidate of candidates) {
+      let reason: string | undefined;
+      try {
+        reason = await protectionReadOnly(harness, candidate);
+      } catch {
+        reason = 'error';
+      }
+      if (reason !== undefined) { bump(reason); kept += 1; continue; }
+      preview.push(candidate.entry.key);
+    }
     return {
-      scanned: entries.length, removed: 0, kept: kept + candidates.length, dryRun: true, reasons,
-      removedKeys: candidates.map(candidate => candidate.entry.key),
+      scanned: entries.length, removed: 0, kept, dryRun: true, reasons,
+      removedKeys: preview,
     };
   }
 
