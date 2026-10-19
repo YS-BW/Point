@@ -69,6 +69,16 @@
 
 完成边界：资源契约、内存桩、边界不变量与独立测试。**不是完整 WP2，也不是 G1 通过**。未实现/未验证：真实浏览器/文件/通知/网络 adapter；Durable 持久化、迁移与崩溃恢复；组合根接线与 HTTP 错误码映射；多进程/异步存储并发压测、真实 SIGKILL、长时间运行与费用。资源状态目前只在内存 store 中，不能用于真实数据。
 
+## WP1b.2b 上下文/Profile/受保护压缩（2026-10-19）
+
+2026-10-19T01:54:21Z，根目录 `npm run check`、`npm run build` 与 `npm test` 通过：**102 项测试全部通过，0 fail / 0 skip**。构成：服务端既有 **74 项**（chats 7 + conversation-experience 11 + lifecycle 15 + resource 18 + resource-operations 23）+ 本片新增 **18 项**（profile 6 + context-budget 4 + compaction 8）+ `scripts/boundaries.test.mjs` **10 项**。targeted `node --test apps/server/dist/test/{profile,context-budget,compaction}.test.js` 为 **18/18**。
+
+实现：`point.profile` 唯一权威 + 显式 remember/forget/list/USER.md 纯导出；`point.context` 的 identity/chat/profile sections（8000 总预算、500 单值截断、空 profile 省略）；`conversation.compact` 幂等命令（收据+command task，内层 `pi.compaction` 为真实执行身份）；`model-guard` 用 `ProviderDoc.sessionId` 唯一匹配 compaction permit，无 permit/歧义/非 new 状态 fail-closed，`unknown` 不重放。独立 reviewer 审计发现并修复：B1（non-new ModelCalls 不重放的回归测试缺失）、P1（compact 收据 key 缺 chatId）；P2（同 chat 并发压缩 fail-closed）文档化为已知限制。
+
+原型 `POINT_CRASH_ROUNDS=1 npm test`（**28 项，0 fail / 0 skip**）通过；OpenSpec `agent-context-budget` strict 通过。证据：[WP1b.2b 完整验收输出](../../infra/pi-durable-validation/evidence/wp1b-2b-context-2026-10-19T01-54-21Z.json)。
+
+完成边界：显式 Profile、上下文 sections/预算、手动压缩与压缩模型保护。**WP1b.2b 完成不代表 WP1b/G1 完成**。未验证/未实现：自动阈值压缩长跑与真实模型压缩质量、USER.md 真实导入/文件监听、HTTP/CLI；进程在 compaction summarize 前后被杀时压缩任务 fail-closed，但 `point.model-call` 可能停留 `attempting`（本轮无压缩恢复核销路径，压缩三态证据不完整）；internal-execution chat section fallback、provider error/取消派发路径未进仓库测试；无进程级 SIGKILL fixture。上述项不能由手动压缩 happy path 外推。
+
 ## 已被取代、不要引用的旧口径
 
 - `runtime/acceptance-summary.json` 写 `testsPassed 24/24`，是 2026-10-18T03:08Z 的旧口径（当时还没有后 4 项）。**不要引用。**

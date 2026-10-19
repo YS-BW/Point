@@ -1,6 +1,6 @@
 # Point Server foundation
 
-WP1a：独立可运行的基础骨架。WP1b.1 新增内部对话创建/读取端口，WP1b.2a 提供显式模型绑定下的消息/排队/停止/历史应用接口；WP2 落地资源租约、控制权 epoch 与副作用三态的应用/领域契约（内存桩，未持久化）；工具、定时任务、真实资源与浏览器尚未实现；健康接口只报告 foundation。
+WP1a：独立可运行的基础骨架。WP1b.1 新增内部对话创建/读取端口，WP1b.2a 提供显式模型绑定下的消息/排队/停止/历史应用接口，WP1b.2b 提供显式 Profile、context sections 与受保护的手动压缩；WP2 落地资源租约、控制权 epoch 与副作用三态的应用/领域契约（内存桩，未持久化）；工具、定时任务、真实资源与浏览器尚未实现；健康接口只报告 foundation。
 
 在仓库根目录，Node >=22.19：
 
@@ -66,3 +66,22 @@ const outcome = await commands.runOperation(operation.id, {invoke: async () => '
 ```
 
 `unknown` 用 `observeOperation({operationId, status, result, observation})` 核销。真实资源接入必须实现 Durable 持久化 store，并在不可撤销动作前按 `controlEpoch` 再次自检；本轮不接任何真实浏览器/文件/通知 adapter，也没有 HTTP 映射。契约与未验证项见 [资源边界](../../docs/design/resource-boundary.md)。
+
+## 上下文、Profile 与压缩（WP1b.2b）
+
+`openRuntime` 返回 `profile` 端口；`point.profile` Durable 文档是显式个性化唯一权威，`exportMarkdown()` 只读导出 USER.md，不写文件、不监听外部文件：
+
+```js
+await runtime.profile.remember({requestId: 'm1', key: 'tone', value: '简洁', kind: 'preference', sourceChatId: chat.id});
+console.log(await runtime.profile.list());
+console.log(await runtime.profile.exportMarkdown());
+```
+
+模型请求前由 `point.context` 注入 identity/chat/profile sections：profile 总预算 8000 字符、单值 500 字符截断，空 profile 省略。手动压缩：
+
+```js
+const accepted = await runtime.conversation.compact({chatId: chat.id, requestId: 'c1'});
+const outcome = await runtime.conversation.compactWait(accepted.commandId); // {status, entryId?, taskId?}
+```
+
+压缩只改变活动上下文，不删除原始历史；压缩模型调用与生成调用共用 intent-before-effect 保护，缺少 permit 时 fail-closed。手动压缩需显式模型绑定；自动阈值压缩与真实模型质量未验证。同会话并发手动压缩会 fail-closed，需串行重试。契约与未验证项见 [上下文预算](../../docs/design/context-budget.md)。

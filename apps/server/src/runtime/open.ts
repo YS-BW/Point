@@ -10,13 +10,21 @@ import { preflightStorage } from '../storage/preflight.js';
 import { acquireOwner } from '../storage/owner.js';
 import { assertCompatible, Meta } from '../storage/meta.js';
 import { chatCommands, type ChatCommands } from '../application/chats.js';
+import { profileCommands, type ProfileCommands } from '../application/profile.js';
 import { durableChatStore } from './chats.js';
+import { contextExtension } from './context.js';
 import { guardedModels } from './model-guard.js';
+import { durableProfileStore } from './profile.js';
 import { conversationRuntime } from './conversation.js';
 import type { ConversationCommands } from '../application/conversation.js';
 
 export type ModelBinding = {models: Models; model: ModelRef};
-export async function openRuntime(dataDir: string, binding?: ModelBinding): Promise<RuntimeHandle & {readonly chats: ChatCommands; readonly conversation: ConversationCommands}> {
+export type Runtime = RuntimeHandle & {
+  readonly chats: ChatCommands;
+  readonly conversation: ConversationCommands;
+  readonly profile: ProfileCommands;
+};
+export async function openRuntime(dataDir: string, binding?: ModelBinding): Promise<Runtime> {
   if (binding && !binding.models.getModel(binding.model.provider, binding.model.modelId)) throw new Error('MODEL_NOT_CONFIGURED');
   await mkdir(dataDir, {recursive: true, mode: 0o700});
   const release = acquireOwner(join(dataDir, 'owner.sqlite'));
@@ -31,12 +39,18 @@ export async function openRuntime(dataDir: string, binding?: ModelBinding): Prom
       || (await storage.scanTasks({}, 1, undefined, BACKGROUND_CONTEXT)).items.length > 0;
     const current = () => { if (!harness) throw new Error('RUNTIME_NOT_READY'); return harness; };
     const guard = guardedModels(binding?.models ?? createModels(), current);
-    const conversation = conversationRuntime(current, binding?.model, guard.extension);
+    const context = contextExtension();
+    const conversation = conversationRuntime(current, binding?.model, [guard.extension, context]);
     const registry = createRegistry();
     registry.install(guard.extension);
     registry.install(conversation.extension);
-    harness = await Harness.open(storage, {models: guard.models, registry,
-      settings: {retry: {enabled: false}, compaction: {enabled: false}, followUpMode: 'one-at-a-time'}}, BACKGROUND_CONTEXT);
+    registry.install(context);
+    harness = await Harness.open(storage, {models: guard.models, registry, settings: {
+      retry: {enabled: false},
+      // Manual compaction ignores `enabled`; the thresholds only size automatic compaction, unverified offline.
+      compaction: {enabled: true, reserveTokens: 4096, keepRecentTokens: 8192, backgroundTokens: 0},
+      followUpMode: 'one-at-a-time',
+    }}, BACKGROUND_CONTEXT);
     let meta = await harness.snapshot(Meta, BACKGROUND_CONTEXT);
     if (!meta) {
       if (populated) throw new Error('UNRECOGNIZED_DATA');
@@ -53,9 +67,11 @@ export async function openRuntime(dataDir: string, binding?: ModelBinding): Prom
     if (binding) harness.resume();
     const activeHarness = harness;
     let closing: Promise<void> | undefined;
-    return {instanceId: meta.instanceId, chats: chatCommands(durableChatStore(activeHarness)), conversation: conversation.commands, closed: activeHarness.closed.then(() => undefined), close() {
-      return closing ??= activeHarness.close(BACKGROUND_CONTEXT).finally(release);
-    }};
+    return {instanceId: meta.instanceId, chats: chatCommands(durableChatStore(activeHarness)),
+      conversation: conversation.commands, profile: profileCommands(durableProfileStore(current)),
+      closed: activeHarness.closed.then(() => undefined), close() {
+        return closing ??= activeHarness.close(BACKGROUND_CONTEXT).finally(release);
+      }};
   } catch (error) {
     try {
       if (harness) await harness.close(BACKGROUND_CONTEXT);

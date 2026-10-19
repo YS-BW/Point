@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T01:35:09.000000+00:00",
+  "generatedAt": "2026-10-19T01-54-21.000000+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -126,6 +126,13 @@
       "bytes": 22616,
       "sha256": "ecf91d125e1586bf1ececaba9a238482ab02fb39c07ebe3c8c0cc1ab34799778",
       "source": "WP2 final re-verification after independent review fixes",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1b-2b-context-2026-10-19T01-54-21Z.json",
+      "bytes": 38739,
+      "sha256": "bc7d1121fca74883040f690ba4ed2a8e5757fdd2c40be9ea4cbf28b374a5efde",
+      "source": "WP1b.2b local acceptance commands (check/build/targeted/full/boundary/openspec/prototype)",
       "normalized": "absolute home prefix -> <home>"
     }
   ]
