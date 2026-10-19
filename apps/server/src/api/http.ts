@@ -187,7 +187,8 @@ export function createHttp(options: HttpOptions): Server {
     void handle(request, response, requestId, counter).catch(async error => {
       const mapped = mapError(error);
       if (mapped.status === 413) {
-        response.setHeader('Connection', 'close');
+        // Drain without buffering. Closing a socket while an upload is in flight can
+        // reset it before the client receives our 413 (also used by /v1/agent).
         request.resume();
       }
       try {

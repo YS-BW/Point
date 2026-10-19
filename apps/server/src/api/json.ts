@@ -41,7 +41,8 @@ export async function readJsonObject(
     throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'request body too large');
   }
   const chunks: Buffer[] = [];
-  for await (const chunk of request) {
+  // An early return must not destroy the socket before the 413 envelope is flushed.
+  for await (const chunk of request.iterator({destroyOnReturn: false})) {
     const bytes = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
     counter.bytes += bytes;
     if (counter.bytes > limit) {

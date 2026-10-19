@@ -236,11 +236,11 @@ export function conversationRuntime(getHarness: () => Harness, model: ModelRef |
       for (const entry of page.items) {
         // Compaction summaries are context, not chat messages: the projection excludes them.
         if (CompactionEntry.is(entry)) continue;
-        for (const message of entry.model ?? []) {
+        for (const [index, message] of (entry.model ?? []).entries()) {
           if (message.role !== 'user' && message.role !== 'assistant') continue;
           const text = typeof message.content === 'string' ? message.content
             : message.content.filter(part => part.type === 'text').map(part => part.text).join('');
-          if (text) items.push({id: String(entry.id), role: message.role, text,
+          if (text) items.push({id: index === 0 ? String(entry.id) : `${entry.id}:${index}`, role: message.role, text,
             interrupted: message.role === 'assistant' && ['error', 'aborted'].includes(message.stopReason)});
         }
       }

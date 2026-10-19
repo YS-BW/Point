@@ -23,3 +23,7 @@ WP4 已冻结 `/v1` 传输契约（错误信封、幂等键、鉴权、访问日
 ## Impact
 
 修改 `apps/server/src/api/**`（新增 agui 投影与 SSE）、新增参考 CLI，更新文档与 OpenSpec。不改 domain/storage/runtime 语义、不新增依赖、不引入第二执行引擎；不实现线程流/`Last-Event-ID`/同步 run/state+messages 快照/运行流（WP6）、interrupt/resume（WP7）、CopilotKit 运行时或任意 UI 代码生成。
+
+## Approved correction (2026-10-19)
+
+The user approved the compatibility correction after review. This section supersedes the earlier no-dependency and wire-shape decisions: pin @ag-ui/core/client/encoder 1.0.3 at the edge; use official schemas/encoder and HttpAgent. Outcome is an object; omit standard usage until per-run attribution is reliable. Use unique provisional stream IDs and canonical Durable entry/message IDs in an authoritative messages snapshot at completion. CLI must reject incomplete streams. Observation timeout/overflow must not claim execution failure or replay work. Full reconnect subscription remains WP6. Scope includes api/agui, application stream port, runtime projection/history, CLI, boundary rules, tests, docs and lockfile, serially. No persistent schema change.

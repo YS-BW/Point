@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-19T07:22:51.000000+00:00",
+  "generatedAt": "2026-10-19T07:50:28.464825+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -182,6 +182,13 @@
       "bytes": 5000,
       "sha256": "6ff02c1bb26fbd0d09a176b7930df86a776609a0458f958521a0238dc14d6b59",
       "source": "WP5 AG-UI projection gate (G2) commands, independent verification and audit",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp5-sdk-correction-2026-10-19T07-50-28Z.json",
+      "bytes": 201583,
+      "sha256": "bdd362512effadf8c9538316b6499f31911cc838d33e5087107734d80543b71c",
+      "source": "WP5 SDK correction final commands, shared HTTP regression and prior failed verification",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

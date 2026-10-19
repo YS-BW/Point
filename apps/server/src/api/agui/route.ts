@@ -60,6 +60,9 @@ export function parseRunAgentInput(body: Record<string, unknown>): ParsedInput {
 }
 
 function streamHeaders(response: ServerResponse, requestId: string): void {
+  // Keep an error handler through asynchronous final flush, including pre-run errors.
+  // It belongs to this response's lifetime; never exposes socket details to logs.
+  response.on('error', () => { response.destroy(); });
   response.statusCode = 200;
   response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   response.setHeader('Cache-Control', 'no-store');
@@ -76,16 +79,22 @@ async function writeFrame(response: ServerResponse, event: AguiEvent): Promise<v
   await new Promise<void>((resolve, reject) => {
     const onDrain = (): void => { cleanup(); resolve(); };
     const onClose = (): void => { cleanup(); reject(new Error('CLIENT_CLOSED')); };
+    const onError = (): void => { cleanup(); reject(new Error('CLIENT_CLOSED')); };
     const cleanup = (): void => {
       response.off('drain', onDrain);
       response.off('close', onClose);
+      response.off('error', onError);
     };
     response.once('drain', onDrain);
     response.once('close', onClose);
+    response.once('error', onError);
   });
 }
 
 function errorEvent(error: unknown): Readonly<{message: string; code: string}> {
+  if (error instanceof Error && ['OBSERVATION_TIMEOUT', 'OBSERVATION_RESYNC_REQUIRED'].includes(error.message)) {
+    return {code: error.message, message: 'Observation interrupted; execution status must be synchronized.'};
+  }
   const mapped = mapError(error);
   return {message: mapped.status === 500 ? messageFor('INTERNAL_ERROR') : mapped.message, code: mapped.code};
 }
@@ -111,10 +120,10 @@ export function agentRoute(): StreamRoute {
       const threadId = parsed.value.threadId;
       const runId = randomUUID();
       const controller = new AbortController();
-      let closedEarly = false;
+      const onError = (): void => { controller.abort(); };
+      response.on('error', onError);
       const onClose = (): void => {
         if (!response.writableEnded) {
-          closedEarly = true;
           controller.abort();
         }
       };
@@ -130,6 +139,8 @@ export function agentRoute(): StreamRoute {
           response.end();
         }
         context.request.off('close', onClose);
+        response.off('close', onClose);
+        response.off('error', onError);
         return;
       }
       const projection = new RunProjection(event => writeFrame(response, event), {threadId, runId});
@@ -138,7 +149,7 @@ export function agentRoute(): StreamRoute {
         for await (const event of run.events) {
           if (controller.signal.aborted) break;
           if (event.type === 'run_end') {
-            await projection.finish(event.outcome, event.usage);
+            await projection.finish(event.outcome);
             break;
           }
           await projection.handle(event);
@@ -154,7 +165,7 @@ export function agentRoute(): StreamRoute {
         response.off('close', onClose);
         await run.cancel().catch(() => undefined);
         if (!response.writableEnded && !response.destroyed) response.end();
-        void closedEarly;
+        response.off('error', onError);
       }
     },
   };

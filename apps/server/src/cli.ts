@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { HttpAgent } from '@ag-ui/client';
 
 type Args = {url: string; token: string; message: string; chat?: string};
 
@@ -68,8 +69,8 @@ function printSummary(event: Record<string, unknown>): void {
       process.stdout.write(`[tool result] ${String(event.content)}\n`);
       break;
     case 'RUN_FINISHED': {
-      const usage = event.usage as {totalTokens?: unknown} | undefined;
-      process.stdout.write(`[done] outcome=${String(event.outcome)} totalTokens=${String(usage?.totalTokens ?? 0)}\n`);
+      const outcome = event.outcome as {type?: string} | undefined;
+      process.stdout.write(`[done] outcome=${outcome?.type ?? 'success'}\n`);
       break;
     }
     case 'RUN_ERROR':
@@ -79,40 +80,6 @@ function printSummary(event: Record<string, unknown>): void {
       // Unknown events are tolerated by design.
       break;
   }
-}
-
-async function consume(response: Response): Promise<number> {
-  if (response.status !== 200) {
-    const text = await response.text();
-    process.stderr.write(`[error] HTTP ${response.status}: ${text}\n`);
-    return 1;
-  }
-  if (response.body === null) throw new Error('EMPTY_STREAM');
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let failed = false;
-  for (;;) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, {stream: true});
-    let separator = buffer.indexOf('\n\n');
-    while (separator >= 0) {
-      const block = buffer.slice(0, separator);
-      buffer = buffer.slice(separator + 2);
-      for (const line of block.split('\n')) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (payload.length === 0) continue;
-        let event: Record<string, unknown>;
-        try { event = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
-        if (event.type === 'RUN_ERROR') failed = true;
-        printSummary(event);
-      }
-      separator = buffer.indexOf('\n\n');
-    }
-  }
-  return failed ? 1 : 0;
 }
 
 async function main(): Promise<number> {
@@ -132,12 +99,23 @@ async function main(): Promise<number> {
     chatId = String((await created.json() as {id: unknown}).id);
   }
   const runId = `cli-${randomUUID()}`;
-  const stream = await call(`${args.url}/v1/agent`, args.token, {
-    threadId: chatId, runId,
-    messages: [{id: randomUUID(), role: 'user', content: args.message}],
-  }, `cli-run-${randomUUID()}`, controller.signal);
+  const agent = new HttpAgent({
+    url: `${args.url}/v1/agent`, threadId: chatId,
+    headers: {authorization: `Bearer ${args.token}`, 'idempotency-key': `cli-run-${randomUUID()}`},
+    initialMessages: [{id: randomUUID(), role: 'user', content: args.message}],
+  });
+  let terminal = false;
+  let failed = false;
   try {
-    return await consume(stream);
+    await agent.runAgent({runId, abortController: controller}, {
+      onEvent: ({event}) => { printSummary(event as unknown as Record<string, unknown>); },
+      onRunFinishedEvent: () => { terminal = true; },
+      onRunErrorEvent: () => { terminal = true; failed = true; },
+      // Point owns the complete history. SDK default merge preserves client-only drafts.
+      onMessagesSnapshotEvent: ({event}) => ({messages: event.messages, stopPropagation: true}),
+    });
+    if (!terminal) throw new Error('STREAM_INCOMPLETE');
+    return failed ? 1 : 0;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);

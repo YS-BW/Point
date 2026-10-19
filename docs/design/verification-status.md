@@ -219,3 +219,17 @@
 **未验证项**：真实 provider 逐 token 流/网络断线重连/限流（仅 faux）；真实工具执行到 `TOOL_CALL_*` 端到端（前台 chat run 不注册 tool extension，工具顺序由 projection 与脚本化 port 覆盖）；usage 与 provider 账单对账；多客户端/follow-up run 隔离；SSE 反向代理缓冲/背压/半开/EPIPE（`response` 未装 `error` 监听）；重复 end 事件可能双发 END；`point.ui` 方括号 DOM 形式未覆盖且当前无发射路径；`Last-Event-ID`/快照/`ACTIVITY`/运行流（WP6）与 interrupt/resume（WP7）不在本片；高频并发与长跑未测。
 
 证据：[WP5/G2 追加证据](../../infra/pi-durable-validation/evidence/wp5-agui-g2-2026-10-19T07-22-51Z.json)。
+
+## WP5 官方 SDK 纠偏验收（2026-10-19T07:50:28.464825+00:00）
+
+**勘误**：此前 WP5/G2 的自写 wire types、汇总 usage 对象和字符串 outcome 不足以证明官方 AG-UI 1.0 兼容。原证据保留，不覆盖。此次按用户确认方案替换为官方 SDK，并通过官方客户端的真实 Server/Durable 场景。G2 的原自动化依据由本次结果补充；本次没有新的独立评审，不把自动化通过外推为完整产品验收。G3/WP6 仍未完成。
+
+最终同树验收：根目录 `npm run check`、`npm test` **328/328 通过，0 fail / 0 skip**；AG-UI 独立套件 **24/24**，最终 HTTP+AG-UI 联合 targeted **38/38**；原型 `npm run check` 与 `POINT_CRASH_ROUNDS=1 npm test` **28/28**；OpenSpec strict 与 diff check 通过。所有数据库为测试夹具，未迁移个人数据；prototype latest JSON 运行前已备份，路径见证据。
+
+修复：官方 `@ag-ui/core/client/encoder@1.0.3` + 显式 schema peer `zod@3.25.76`；outcome 对象、标准 usage 暂省略；草稿跨 run 唯一与 Durable entry 历史对账；HttpAgent 消费、权威消息快照回调、截断/坏 JSON/坏字段非零退出；完成命令同键重试不再次执行；断开观察不停止执行；取消、重复 END 与持续活动超出两分钟的回归；观察缓冲有界，resnapshot/空闲超时明确要求同步；异步响应错误监听。
+
+最终复验曾出现共享 HTTP 的 oversized-body `fetch failed`（旧实现提前关闭 socket），失败输出保留在证据。修复读取迭代器退出销毁与过早 close，新增连续声明长度上传及 chunked 溢出回归，不放宽 413 或“不得执行命令”的断言；修复后最终全量通过。
+
+**边界与未验证项**：结束快照目前仅为既有可见文本历史，Point 消费者必须使用官方快照回调显式替换视图，默认 HttpAgent 合并不能自动清掉本地草稿。缓冲溢出/SDK resnapshot 显式中断观察，不提供 WP6 接续；活动请求重试不保证补齐已丢 token。未验证真实 provider/工具全链路、完整工具历史、代理/半开/慢消费压测、正式 Docker/长跑与本轮独立评审。没有引入第二引擎、第二事实库或持久 schema。
+
+证据：[WP5 SDK 纠偏完整输出](../../infra/pi-durable-validation/evidence/wp5-sdk-correction-2026-10-19T07-50-28Z.json)（含最终源码哈希与前次失败输出）。

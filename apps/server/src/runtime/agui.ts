@@ -1,20 +1,21 @@
 /**
  * Runtime side of the AG-UI projection: consumes only public pi-durable APIs
- * (`watchEvents`, `Harness.submission`, `Harness.snapshot(UsageDoc)`) and emits the
+ * (`watchEvents`, `Harness.submission`) and emits the
  * provider-neutral events from `application/agent-stream.ts`. No AG-UI type may appear
  * here; the edge (`api/agui/**`) owns the wire protocol.
  */
 
+import { randomUUID } from 'node:crypto';
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import {
-  UsageDoc, watchEvents,
+  watchEvents,
   type AgentEvent, type AgentEventStream, type EntryRecord, type Harness, type SubmissionId,
 } from '@earendil-works/pi-durable';
 import type { ConversationId } from '@earendil-works/pi-durable';
 import { canonicalJson } from '../application/resource.js';
 import type { ConversationCommands } from '../application/conversation.js';
 import type {
-  AgentRunEvent, AgentRunPort, AgentRunRequest, AgentRunStream, AgentUsage,
+  AgentRunEvent, AgentRunPort, AgentRunRequest, AgentRunStream,
 } from '../application/agent-stream.js';
 
 /** Stop projecting when the run stops making progress; prevents a hung stream. */
@@ -22,45 +23,6 @@ const IDLE_TIMEOUT_MS = 120_000;
 const SETTLE_TIMEOUT_MS = 5_000;
 const TOOL_RESULT_CHARS = 8_192;
 const CANCELLED_REASONS = new Set(['aborted', 'stopped', 'cancelled']);
-
-type Totals = {input: number; output: number; cacheRead: number; cacheWrite: number; total: number};
-type UsageState = Readonly<{
-  models?: Readonly<Record<string, unknown>>;
-  tools?: Readonly<Record<string, unknown>>;
-}>;
-
-function counter(value: unknown, key: string): number {
-  if (value === null || typeof value !== 'object') return 0;
-  const field = (value as Record<string, unknown>)[key];
-  return typeof field === 'number' && Number.isFinite(field) ? field : 0;
-}
-
-/** Sum every usage bucket of the conversation ledger. */
-function totals(state: UsageState | undefined): Totals {
-  const sum: Totals = {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0};
-  for (const bucket of [state?.models, state?.tools]) {
-    if (bucket === undefined) continue;
-    for (const usage of Object.values(bucket)) {
-      sum.input += counter(usage, 'input');
-      sum.output += counter(usage, 'output');
-      sum.cacheRead += counter(usage, 'cacheRead');
-      sum.cacheWrite += counter(usage, 'cacheWrite');
-      sum.total += counter(usage, 'totalTokens');
-    }
-  }
-  return sum;
-}
-
-function delta(after: Totals, before: Totals): AgentUsage {
-  const diff = (value: number): number => Math.max(0, value);
-  return {
-    inputTokens: diff(after.input - before.input),
-    outputTokens: diff(after.output - before.output),
-    cacheReadTokens: diff(after.cacheRead - before.cacheRead),
-    cacheWriteTokens: diff(after.cacheWrite - before.cacheWrite),
-    totalTokens: diff(after.total - before.total),
-  };
-}
 
 function bound(text: string): string {
   const chars = Array.from(text);
@@ -113,9 +75,8 @@ export function agentRuntime(conversation: ConversationCommands, getHarness: () 
         throw error;
       }
       const marker = `point-command:${command.commandId}`;
-      const baseline = totals(stream.snapshot.usage as UsageState | undefined);
       return {
-        events: project(stream, marker, baseline, harness, conversationId, signal, stop),
+        events: project(stream, marker, harness, conversationId, signal, stop, conversation, command.commandId),
         cancel: async () => { await stop(); },
       };
     },
@@ -125,20 +86,28 @@ export function agentRuntime(conversation: ConversationCommands, getHarness: () 
 async function* project(
   stream: AgentEventStream,
   marker: string,
-  baseline: Totals,
   harness: Harness,
   conversationId: ConversationId,
   signal: AbortSignal,
   stop: () => Promise<unknown>,
+  conversation: ConversationCommands,
+  commandId: string,
 ): AsyncGenerator<AgentRunEvent> {
   const queue: AgentEvent[] = [];
+  const streamId = randomUUID();
+  let overflow = false;
   let wake: (() => void) | undefined;
   const notify = (): void => { const resume = wake; wake = undefined; resume?.(); };
-  stream.start(async events => { queue.push(...events); notify(); });
-  const aborted = new Promise<void>(resolve => {
-    if (signal.aborted) resolve();
-    else signal.addEventListener('abort', () => resolve(), {once: true});
+  stream.start(async events => {
+    // A slow transport must not create an unbounded second event backlog.
+    if (queue.length + events.length > 1024) { overflow = true; queue.length = 0; }
+    else if (!overflow) queue.push(...events);
+    notify();
   });
+  let onAbort: () => void;
+  const aborted = new Promise<void>(resolve => { onAbort = resolve; });
+  if (signal.aborted) onAbort!();
+  else signal.addEventListener('abort', onAbort!, {once: true});
   let submissionId: string | undefined;
   let activeRun = false;
   let runEnded = false;
@@ -149,7 +118,6 @@ async function* project(
   let turn = 0;
   let step: string | undefined;
   const openTools = new Set<string>();
-  const startedAt = Date.now();
   let lastActivity = Date.now();
 
   const bindSubmission = (id: string): void => {
@@ -162,9 +130,11 @@ async function* project(
 
   try {
     while (true) {
+      if (overflow) throw new Error('OBSERVATION_RESYNC_REQUIRED');
       while (queue.length > 0) {
         const event = queue.shift()!;
         lastActivity = Date.now();
+        if (event.type === 'snapshot') throw new Error('OBSERVATION_RESYNC_REQUIRED');
         if (event.type === 'submission') {
           const record = event.record;
           if (record.requestId === marker) {
@@ -183,7 +153,7 @@ async function* project(
         switch (event.type) {
           case 'message_start':
             if (event.message.role === 'assistant') {
-              message = {id: `msg-${++messageSeq}`, content: new Map(), emitted: ''};
+              message = {id: `draft-${streamId}-${++messageSeq}`, content: new Map(), emitted: ''};
               yield {type: 'message_start', messageId: message.id};
             }
             break;
@@ -273,25 +243,44 @@ async function* project(
         break;
       }
       if (signal.aborted) return;
-      if (Date.now() - lastActivity > IDLE_TIMEOUT_MS || Date.now() - startedAt > IDLE_TIMEOUT_MS) {
-        throw new Error('RUN_TIMEOUT');
+      // Also observe the durable command: retries attach after submission events already happened.
+      const status = await conversation.status(commandId);
+      if (status.status === 'answered') { settled = {status: 'done'}; break; }
+      if (status.status === 'stopped') { settled = {status: 'unanswered', reason: 'stopped'}; break; }
+      if (status.status === 'failed' || status.status === 'unanswered') {
+        settled = {status: 'unanswered', reason: 'failed'}; break;
       }
-      await Promise.race([
-        new Promise<void>(resolve => { wake = resolve; }),
-        aborted,
-        new Promise<void>(resolve => { setTimeout(resolve, 200); }),
-      ]);
+      if (Date.now() - lastActivity > IDLE_TIMEOUT_MS) throw new Error('OBSERVATION_TIMEOUT');
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          new Promise<void>(resolve => { wake = resolve; }), aborted,
+          new Promise<void>(resolve => { timer = setTimeout(resolve, 200); }),
+        ]);
+      } finally { clearTimeout(timer); wake = undefined; }
     }
-    const after = totals((await harness.snapshot(UsageDoc, conversationId, context)) as UsageState | undefined);
-    const usage = delta(after, baseline);
+    // Reconcile provisional stream messages against the single authoritative history.
+    // Bounded full snapshot; never label an incomplete page as the whole history.
+    const messages: {id: string; role: 'user' | 'assistant'; content: string}[] = [];
+    let cursor: string | undefined;
+    let pages = 0, bytes = 0;
+    do {
+      const page = await conversation.history(String(conversationId), 100, cursor);
+      messages.push(...page.items.map(item => ({id: item.id, role: item.role, content: item.text})));
+      cursor = page.next;
+      bytes += Buffer.byteLength(JSON.stringify(page.items), 'utf8');
+      if (++pages > 1000 || bytes > 8 * 1024 * 1024 || messages.length > 10000) throw new Error('OBSERVATION_RESYNC_REQUIRED');
+    } while (cursor !== undefined);
+    yield {type: 'messages_snapshot', messages};
     if (settled!.status === 'done') {
-      yield {type: 'run_end', outcome: 'success', usage};
+      yield {type: 'run_end', outcome: 'success'};
     } else if (CANCELLED_REASONS.has(settled!.reason)) {
-      yield {type: 'run_end', outcome: 'cancelled', usage};
+      yield {type: 'run_end', outcome: 'cancelled'};
     } else {
       throw new Error(settled!.reason === 'no_model' ? 'MODEL_NOT_CONFIGURED' : 'RUN_FAILED');
     }
   } finally {
+    signal.removeEventListener('abort', onAbort!);
     await stop();
   }
 }
@@ -300,7 +289,7 @@ async function settle(harness: Harness, submissionId: string): Promise<{status: 
   const submission = await harness.submission(Number(submissionId) as SubmissionId, context);
   if (submission === undefined) throw new Error('RUN_FAILED');
   const timeout = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => reject(new Error('RUN_TIMEOUT')), SETTLE_TIMEOUT_MS);
+    const timer = setTimeout(() => reject(new Error('OBSERVATION_TIMEOUT')), SETTLE_TIMEOUT_MS);
     timer.unref?.();
   });
   const record = await Promise.race([submission.wait(context), timeout]);

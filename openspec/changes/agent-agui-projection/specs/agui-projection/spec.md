@@ -24,7 +24,7 @@ Failures before a request is accepted (auth, content type/JSON, body limit, Idem
 
 #### Scenario: Successful run
 - **WHEN** a client posts a valid `RunAgentInput`
-- **THEN** the first SSE event is `RUN_STARTED`, and the last is `RUN_FINISHED` with `outcome: success` and a `usage` field
+- **THEN** the first SSE event is `RUN_STARTED`, and the last is `RUN_FINISHED` with `outcome: {type: success}`; standard `usage` is omitted unless accurately attributed
 
 #### Scenario: Truncated stream
 - **WHEN** the connection drops or the server closes before the run ends
@@ -36,11 +36,11 @@ Failures before a request is accepted (auth, content type/JSON, body limit, Idem
 
 ### Requirement: Cancellation is explicit
 
-Stopping a run MUST close every open entity and finish with `outcome: cancelled`, not by silently dropping the stream.
+Stopping a run MUST close every open entity and finish with `outcome: {type: cancelled}`, not by silently dropping the stream.
 
 #### Scenario: User stops
 - **WHEN** the client requests stop for an active run
-- **THEN** open messages/steps are closed and the stream ends with `RUN_FINISHED` and `outcome: cancelled`
+- **THEN** open messages/steps are closed and the stream ends with `RUN_FINISHED` and `outcome: {type: cancelled}`
 
 ### Requirement: Compatibility rules are enforced
 
@@ -89,3 +89,15 @@ Each SSE `data` line MUST contain exactly one JSON event, with no multi-event fr
 #### Scenario: Executable content refused
 - **WHEN** a UI payload would contain HTML, script or unbounded data
 - **THEN** it is rejected and nothing is persisted
+
+### Requirement: Official client interoperability
+
+The edge MUST use pinned official SDK schemas and encoding. The reference CLI MUST use HttpAgent and reject malformed or truncated streams. Live provisional message IDs MUST be unique across runs; completed history MUST use stable Durable identities and replace provisional messages through an authoritative snapshot.
+
+#### Scenario: Consecutive dialogue
+- **WHEN** an official client completes two requests on the same thread
+- **THEN** both replies remain distinct and its final messages match Durable history without duplicate drafts
+
+#### Scenario: EOF without terminal event
+- **WHEN** a stream ends before RUN_FINISHED or RUN_ERROR
+- **THEN** the CLI exits nonzero and does not claim that the underlying task failed or completed

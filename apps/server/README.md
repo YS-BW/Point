@@ -187,7 +187,7 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 
 ### 边界与未验证项
 
-成功响应不做外层包装、无分页游标之外的读模型；`/inspect` 只报 server 身份/阶段，**Durable 计数依赖尚未实现的读模型（WP6）**。不实现 AG-UI/SSE（WP5）、多租户/OAuth/限流、批量或删除类端点。`/v1` 与真实模型/外部端点组合的端到端行为取决于 `openRuntime` 绑定与注入的 adapters；HTTP 层本身不使用模型。未验证：跨进程并发压测、真实客户端重连（属 WP5/WP6）、HTTPS 终止与反向代理、限流与审计留存。
+成功响应不做外层包装、无分页游标之外的读模型；`/inspect` 只报 server 身份/阶段，**Durable 计数依赖尚未实现的读模型（WP6）**。AG-UI/SSE 见下文 WP5；不实现多租户/OAuth/限流、批量或删除类端点。`/v1` 与真实模型/外部端点组合的端到端行为取决于 `openRuntime` 绑定与注入的 adapters；HTTP 层本身不使用模型。未验证：跨进程并发压测、真实客户端重连（属 WP5/WP6）、HTTPS 终止与反向代理、限流与审计留存。
 
 ## 状态 v2 与迁移（WP3）
 
@@ -215,7 +215,7 @@ const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, 
 
 ## AG-UI 投影：`POST /v1/agent`（WP5）
 
-一次前台 run 一条 `text/event-stream`。端点复用 `/v1` 的 Bearer、fail-closed 503、1 MiB 请求体上限与访问日志；成功流以 `RUN_STARTED` 开始、以 `RUN_FINISHED` 结束（`outcome` + `usage`），失败以 `RUN_ERROR` 结束。内部事实仍在 Durable，AG-UI 只是投影（见 [协议评估](../../docs/design/protocol-agui.md)）。
+一次前台 run 一条 `text/event-stream`。端点复用 `/v1` 的 Bearer、fail-closed 503、1 MiB 请求体上限与访问日志；成功流以 `RUN_STARTED` 开始、以 `RUN_FINISHED` 结束（`outcome: {type: "success"|"cancelled"}`），失败以 `RUN_ERROR` 结束。内部事实仍在 Durable，AG-UI 只是投影（见 [协议评估](../../docs/design/protocol-agui.md)）。
 
 ### 输入（AG-UI `RunAgentInput` 子集）
 
@@ -231,11 +231,11 @@ const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, 
 ### SSE 帧与生命周期
 
 - 每个块恰好一条 `data: <一个 JSON 事件>\n\n`；不使用 `event:` 语义、不使用多事件帧（消费端可忽略 `id:`，本片不发送）。
-- 首帧必须是 `RUN_STARTED` 或 `RUN_ERROR`；正常结束必须是 `RUN_FINISHED`（`outcome: success|cancelled`、`usage`）；流内失败以 `RUN_ERROR`（固定 message，不泄漏栈/路径/凭据）结束。
+- 首帧必须是 `RUN_STARTED` 或 `RUN_ERROR`；正常结束必须是 `RUN_FINISHED`（`outcome: {type: "success"|"cancelled"}`，不伪造标准 usage）；流内失败以 `RUN_ERROR`（固定 message，不泄漏栈/路径/凭据）结束。
 - **传输级失败不开 SSE**：鉴权失败/未配置 token、`Content-Type` 或 JSON 非法、body 超限、缺/非法 `Idempotency-Key`、`agent` 未就绪（`RUNTIME_NOT_READY`）、未知路径/方法等，返回 WP4 统一 JSON 信封（400/401/404/405/413/503），此时**没有 SSE、也就没有 `RUN_STARTED`**；只有传输层与鉴权均通过、请求已被受理后才打开 `text/event-stream`，其首帧才是 `RUN_STARTED`/`RUN_ERROR`（已受理请求的语义坏值以 `RUN_ERROR` 表达）。
 - **截断不伪造完成**：客户端断开或服务端关闭导致的中断流**不发** `RUN_FINISHED`，客户端据此区分"完成"与"断了"。
-- **取消**：既有 `POST /v1/chats/:id/stop` 仍有效；run 被停止时先关闭已开实体（`TEXT_MESSAGE_END`/`STEP_FINISHED`/`TOOL_CALL_END`），再以 `RUN_FINISHED` `outcome:"cancelled"` 结束，不会静默断流。
-- `protocolVersion`：`"1.0"`（随 `RUN_STARTED`/`RUN_FINISHED` 提供）。
+- **取消**：既有 `POST /v1/chats/:id/stop` 仍有效；run 被停止时先关闭已开实体（`TEXT_MESSAGE_END`/`STEP_FINISHED`/`TOOL_CALL_END`），再以 `RUN_FINISHED` `outcome:{type:"cancelled"}` 结束，不会静默断流。
+- `protocolVersion`：`"1.0"`（随 `RUN_STARTED` 提供）。
 
 ### 真实投影的事件族（按 SDK 公开能力裁剪）
 
@@ -247,11 +247,23 @@ const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, 
 | `STEP_STARTED/FINISHED` | `turn_start`/`turn_end`（stepName=`turn-N`，真实回合边界） |
 | `RUN_ERROR` | 受理/校验/MODEL_NOT_CONFIGURED/CHAT_NOT_FOUND/运行失败（固定 message+稳定 code） |
 
-**不投影（能力不足或范围外，宁可不发）**：`REASONING_*`、`TOOL_CALL_ARGS` 逐 token 分片、`STATE_*`/`MESSAGES_SNAPSHOT`/`ACTIVITY_*`/`SUBAGENT_*`/`RAW`、`Last-Event-ID` 重放、interrupt/resume、后台任务进度（均属 WP6/WP7）。
+**不投影（能力不足或范围外，宁可不发）**：`REASONING_*`、`TOOL_CALL_ARGS` 逐 token 分片、`STATE_*`/`ACTIVITY_*`/`SUBAGENT_*`/`RAW`、`Last-Event-ID` 重放、interrupt/resume、后台任务进度（均属 WP6/WP7）。
 
-### usage 口径（派生，不是 provider 账单）
+### 官方 SDK、消息身份与恢复边界
 
-`RUN_FINISHED.usage = {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalTokens}`，由 run 开始与结束时的**会话 `UsageState` 账本差分**按 model/tool bucket 汇总得到。它是真实 Durable 记录上的派生口径：**按 bucket 聚合、不保证 provider 精确账单**（不拆分单次调用、不含 cost/货币、retry/compaction 的归属可能与 provider 账单不同）；未验证项。
+边缘锁定 `@ag-ui/core/client/encoder@1.0.3`，输出先用官方 `EventSchema` 校验再编码；CLI 使用 `HttpAgent`。内部 runtime/application 不依赖 AG-UI。标准 `usage` 暂不发送：会话账本差分不能证明单次运行归属；内部累计账本不受影响。
+
+流式草稿 ID 含观察流随机标识，跨请求不重复；落盘历史 ID 来自 Durable entry，多消息 entry 使用消息序号后缀。运行结束前发送 `MESSAGES_SNAPSHOT` 对账（上限为 10,000 条可见文本消息、8 MiB 原始历史项、1,000 页；超限显式要求重新同步，不发送不完整快照）。当前快照只覆盖现有可见文本历史，完整工具历史投影仍属 WP6。
+
+**Point 客户端必须设置服务端权威快照策略**，否则官方默认合并会保留临时草稿：
+
+```ts
+onMessagesSnapshotEvent: ({event}) => ({messages: event.messages, stopPropagation: true})
+```
+
+客户端待发送输入应保存在独立输入框草稿中，不能依赖消息视图保留本地未提交内容。`runId` 标识本次观察流；同一 `Idempotency-Key` 重试仍观察同一 Durable command，不再次执行。已完成命令可立即返回权威快照及终态；活动命令重试不保证补发丢失 token。
+
+断开 HTTP 只停止观察，停止任务仍须显式 stop。没有终止事件的 EOF、坏 JSON、已知事件坏值导致 CLI 非零退出。取消以 cancelled 呈现。持续有进展的流没有两分钟总时长限制；观察空闲超时返回 `OBSERVATION_TIMEOUT`，观察缓冲超限或 Durable resnapshot 返回 `OBSERVATION_RESYNC_REQUIRED`，均不代表执行失败、不取消或重放任务。完整重连订阅与 resnapshot 接续属 WP6。
 
 ### `point.ui.*` CUSTOM 契约（仅占位，不渲染）
 
@@ -267,7 +279,7 @@ POINT_API_TOKEN=... npm run cli -w @point/server -- --message "你好"
 node apps/server/dist/src/cli.js --url http://127.0.0.1:4310 --token ... --chat 9 --message "继续"
 ```
 
-打印 run/step/tool 摘要与文本增量、`[done] outcome=... totalTokens=...`；`RUN_ERROR` 以非零退出码结束。它是参考消费者，**不替换**原型 CLI。
+打印 run/step/tool 摘要与文本增量、`[done] outcome=...`；`RUN_ERROR`、截断与协议错误以非零退出码结束。它是参考消费者，**不替换**原型 CLI。
 
 ### 未验证 / 边界
 

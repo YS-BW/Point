@@ -8,6 +8,8 @@
  * - point.ui.* is a bounded declarative contract with no HTML/JS/DOM
  */
 
+import { HttpAgent } from '@ag-ui/client';
+import { EventSchema } from '@ag-ui/core/schemas';
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -15,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { createModels } from '@earendil-works/pi-ai/models';
 import { fauxProvider, fauxAssistantMessage, type FauxResponseStep } from '@earendil-works/pi-ai/providers/faux';
 import type { AddressInfo } from 'node:net';
@@ -136,7 +139,7 @@ function fakePort(events: readonly AgentRunEvent[], after?: (signal: AbortSignal
 /* SSE shape, ordering, success                                               */
 /* -------------------------------------------------------------------------- */
 
-test('success stream: RUN_STARTED first, one JSON per frame, closed entities, RUN_FINISHED with usage', async t => {
+test('success stream: official terminal shape, no unattributed usage', async t => {
   const f = await serve(t, fakePort([
     {type: 'step_start', name: 'turn-1'},
     {type: 'message_start', messageId: 'm-1'},
@@ -161,8 +164,8 @@ test('success stream: RUN_STARTED first, one JSON per frame, closed entities, RU
   assert.equal(events[0]!.runId, events.at(-1)!.runId, 'same run identity in start and finish');
   assert.notEqual(events[0]!.runId, 'client-run', 'server owns runId; client one is ignored');
   const last = events.at(-1)!;
-  assert.equal(last.outcome, 'success');
-  assert.deepEqual(last.usage, usage);
+  assert.deepEqual(last.outcome, {type: 'success'});
+  assert.equal(last.usage, undefined, 'unattributed usage must be omitted');
   assert.equal(f.started.length, 1, 'exactly one run admitted');
 });
 
@@ -268,7 +271,7 @@ test('cancellation closes open entities in strict global LIFO order, then finish
     'TOOL_CALL_START', 'TOOL_CALL_ARGS',
     'TOOL_CALL_END', 'TEXT_MESSAGE_END', 'STEP_FINISHED', 'RUN_FINISHED',
   ]);
-  assert.equal(events.at(-1)!.outcome, 'cancelled');
+  assert.deepEqual(events.at(-1)!.outcome, {type: 'cancelled'});
   assert.equal(events[6]!.toolCallId, 'call-1');
   assert.equal(events[7]!.messageId, 'm-1');
   assert.equal(events[8]!.stepName, 'turn-1');
@@ -383,7 +386,7 @@ test('point.ui CUSTOM contract is declarative and bounded', () => {
   assert.deepEqual(validatePointUiPayload({component: 'point.placeholder', props: {title: 'plain text'}}).props,
     {title: 'plain text'});
   // Unknown AG-UI events/fields are tolerated by consumers.
-  assert.equal(isAguiEvent({type: 'FUTURE_EVENT', extra: true}), true);
+  assert.equal(isAguiEvent({type: 'FUTURE_EVENT', extra: true}), false, 'unknown input is not a known outbound event');
   assert.equal(isAguiEvent({type: 42}), false);
 });
 
@@ -418,7 +421,7 @@ async function createChat(base: string): Promise<string> {
   return String(((await response.json()) as {id: unknown}).id);
 }
 
-test('real runtime: text deltas and usage project truthfully and replay-free', {timeout: 20000}, async t => {
+test('real runtime: text deltas and canonical snapshot project truthfully', {timeout: 20000}, async t => {
   const {base, faux, runtime} = await realServer(t, [fauxAssistantMessage('你好，世界。')]);
   const chatId = await createChat(base);
   const response = await fetch(`${base}/v1/agent`, {
@@ -433,9 +436,9 @@ test('real runtime: text deltas and usage project truthfully and replay-free', {
   assert.equal(text, '你好，世界。');
   const finished = events.at(-1)!;
   assert.equal(finished.type, 'RUN_FINISHED');
-  assert.equal(finished.outcome, 'success');
-  const projectedUsage = finished.usage as {totalTokens: number};
-  assert.ok(projectedUsage.totalTokens > 0, 'usage comes from the Durable ledger delta');
+  assert.deepEqual(finished.outcome, {type: 'success'});
+  assert.equal(finished.usage, undefined);
+  for (const event of events) assert.ok(EventSchema.safeParse(event).success, JSON.stringify(event));
   assert.equal(faux.state.callCount, 1);
   const history = await runtime.conversation.history(chatId);
   assert.deepEqual(history.items.map(item => [item.role, item.text]), [['user', 'hi'], ['assistant', '你好，世界。']]);
@@ -462,7 +465,7 @@ test('real runtime: the existing stop command cancels the run and closes entitie
   }
   const last = events.at(-1)!;
   assert.equal(last.type, 'RUN_FINISHED', JSON.stringify(events));
-  assert.equal(last.outcome, 'cancelled');
+  assert.deepEqual(last.outcome, {type: 'cancelled'});
   assert.ok(events.some(event => event.type === 'TEXT_MESSAGE_CONTENT'), 'some text was streamed before stop');
   assert.ok(events.every(event => event.type !== 'RUN_ERROR'));
 });
@@ -480,4 +483,142 @@ test('reference CLI consumes the stream: text, tool/step summaries and success o
   assert.ok(stdout.includes('CLI 收到回答。'), stdout);
   assert.ok(stdout.includes('[done] outcome=success'), stdout);
   assert.ok(!stderr.includes('[error]'), stderr);
+});
+
+
+test('official client: consecutive dialogue reconciles drafts; retry does not execute again', {timeout: 20000}, async t => {
+  const {base, runtime, faux} = await realServer(t, [fauxAssistantMessage('第一份方案'), fauxAssistantMessage('修改后的方案')]);
+  const chatId = await createChat(base);
+  const agent = new HttpAgent({url: `${base}/v1/agent`, threadId: chatId, headers: {...AUTH}});
+  const draftIds: string[] = [];
+  const snapshots: string[][] = [];
+  const subscriber = {
+    onTextMessageStartEvent: ({event}: {event: {messageId: string}}) => { draftIds.push(event.messageId); },
+    onMessagesSnapshotEvent: ({event}: {event: {messages: import('@ag-ui/core').Message[]}}) => {
+      snapshots.push(event.messages.map(m => m.id));
+      return {messages: event.messages, stopPropagation: true};
+    },
+  };
+  agent.headers['idempotency-key'] = 'official-turn-0001';
+  agent.addMessages([{id: 'local-user-1', role: 'user', content: '起草方案'}]);
+  await agent.runAgent({}, subscriber);
+  agent.headers['idempotency-key'] = 'official-turn-0002';
+  agent.addMessages([{id: 'local-user-2', role: 'user', content: '修改方案'}]);
+  await agent.runAgent({}, subscriber);
+  assert.equal(new Set(draftIds).size, 2);
+  const history = await runtime.conversation.history(chatId);
+  assert.deepEqual(agent.messages.map(m => [m.id, m.role, m.content]), history.items.map(m => [m.id, m.role, m.text]));
+  assert.equal(agent.messages.length, 4);
+  const before = structuredClone(agent.messages);
+  // Same idempotency key and last user message: observe the completed command, do not submit twice.
+  await agent.runAgent({}, subscriber);
+  assert.equal(faux.state.callCount, 2);
+  assert.deepEqual(agent.messages, before);
+  assert.deepEqual(snapshots[2], snapshots[1]);
+});
+
+test('real runtime: closing observation does not stop execution; same-key retry recovers result', {timeout: 20000}, async t => {
+  const {base, faux, runtime} = await realServer(t, [fauxAssistantMessage('继续完成这个任务。'.repeat(5))], 100);
+  const chatId = await createChat(base);
+  const body = {threadId: chatId, messages: [{id: 'u1', role: 'user', content: '继续做'}]};
+  const controller = new AbortController();
+  const response = await fetch(`${base}/v1/agent`, {
+    method: 'POST', signal: controller.signal, headers: {...AUTH, ...JSON_HEADERS, 'idempotency-key': 'disconnect-retry-1'},
+    body: JSON.stringify(body),
+  });
+  for await (const event of readFrames(response)) {
+    if (event.type === 'TEXT_MESSAGE_CONTENT') { controller.abort(); break; }
+  }
+  const receipt = await runtime.conversation.send({chatId, text: '继续做', requestId: 'disconnect-retry-1'});
+  assert.equal((await runtime.conversation.wait(receipt.commandId)).status, 'answered');
+  const retried = await fetch(`${base}/v1/agent`, {
+    method: 'POST', headers: {...AUTH, ...JSON_HEADERS, 'idempotency-key': 'disconnect-retry-1'}, body: JSON.stringify(body),
+  });
+  const events = [];
+  for await (const event of readFrames(retried)) events.push(event);
+  assert.deepEqual(events.at(-1)?.outcome, {type: 'success'});
+  assert.ok(events.some(e => e.type === 'MESSAGES_SNAPSHOT'));
+  assert.equal(faux.state.callCount, 1);
+});
+
+async function wireServer(t: TestContext, frames: string): Promise<string> {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, {'content-type': 'text/event-stream'});
+    res.end(frames);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+async function runCli(url: string): Promise<{code: number; stdout: string; stderr: string}> {
+  const child = spawn(process.execPath, [join(process.cwd(), 'apps/server/dist/src/cli.js'),
+    '--url', url, '--chat', '9', '--message', 'hello'], {
+      env: {...process.env, POINT_API_TOKEN: TOKEN}, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', c => { stdout += String(c); });
+  child.stderr.on('data', c => { stderr += String(c); });
+  const [code] = await once(child, 'close') as [number];
+  return {code, stdout, stderr};
+}
+const startedFrame = 'data: {"type":"RUN_STARTED","threadId":"9","runId":"wire","protocolVersion":"1.0"}\n\n';
+for (const [name, tail] of [
+  ['empty EOF', ''],
+  ['partial reply', 'data: {"type":"TEXT_MESSAGE_START","messageId":"m","role":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"m","delta":"half"}\n\n'],
+  ['malformed JSON', 'data: {broken}\n\n'],
+  ['malformed JSON before completion', 'data: {broken}\n\ndata: {"type":"RUN_FINISHED","threadId":"9","runId":"wire","outcome":{"type":"success"}}\n\n'],
+  ['invalid known event', 'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":3,"delta":"bad"}\n\n'],
+] as const) {
+  test(`CLI rejects ${name} without claiming completion`, {timeout: 10000}, async t => {
+    const url = await wireServer(t, startedFrame + tail);
+    const result = await runCli(url);
+    assert.notEqual(result.code, 0);
+    assert.ok(!result.stdout.includes('[done]'), result.stdout);
+    assert.ok(!result.stderr.includes(TOKEN));
+  });
+}
+
+test('official client tolerates unknown events but validates known output', async t => {
+  const url = await wireServer(t, startedFrame + 'data: {"type":"FUTURE_EVENT","extra":true}\n\n' +
+    'data: {"type":"RUN_FINISHED","threadId":"9","runId":"wire","outcome":{"type":"success"}}\n\n');
+  const result = await runCli(url);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.stdout.includes('[done] outcome=success'));
+});
+
+test('outbound schema rejects legacy terminal shapes', () => {
+  assert.throws(() => sseFrame({type: 'RUN_FINISHED', threadId: '9', runId: 'r', outcome: 'success'} as never));
+  assert.throws(() => sseFrame({type: 'RUN_FINISHED', threadId: '9', runId: 'r', usage} as never));
+});
+
+
+test('projection suppresses duplicate entity ends before official validation', async t => {
+  const f = await serve(t, fakePort([
+    {type: 'message_start', messageId: 'm'}, {type: 'text_delta', messageId: 'm', delta: 'hello'},
+    {type: 'message_end', messageId: 'm'}, {type: 'message_end', messageId: 'm'},
+    {type: 'run_end', outcome: 'success', usage},
+  ]));
+  const agent = new HttpAgent({url: `${f.url}/v1/agent`, threadId: '9',
+    headers: {...AUTH, 'idempotency-key': 'duplicate-end-01'}, initialMessages: [{id: 'u', role: 'user', content: 'hi'}]});
+  let ends = 0;
+  await agent.runAgent({}, {onTextMessageEndEvent: () => { ends++; }});
+  assert.equal(ends, 1);
+});
+
+test('active stream survives total elapsed time beyond two minutes', {timeout: 20000}, async t => {
+  t.mock.timers.enable({apis: ['Date']});
+  const {base} = await realServer(t, [fauxAssistantMessage('one two three four five six seven eight nine ten '.repeat(10))], 100);
+  const chatId = await createChat(base);
+  const response = await fetch(`${base}/v1/agent`, {
+    method: 'POST', headers: {...AUTH, ...JSON_HEADERS, 'idempotency-key': 'long-observation-1'},
+    body: JSON.stringify({threadId: chatId, messages: [{id: 'u', role: 'user', content: 'long answer'}]}),
+  });
+  let deltas = 0;
+  const events = [];
+  for await (const event of readFrames(response)) {
+    events.push(event);
+    if (event.type === 'TEXT_MESSAGE_CONTENT') { deltas++; t.mock.timers.tick(45000); }
+  }
+  assert.ok(deltas >= 3, `need multiple progressing updates, got ${deltas}`);
+  assert.deepEqual(events.at(-1)?.outcome, {type: 'success'});
 });

@@ -93,7 +93,7 @@ flowchart LR
     Root --> R
 ```
 
-**允许依赖**：api → application/domain；application → domain；runtime → application/domain/storage/adapters；storage/adapters → application/domain；组合根组装具体实现。domain 与 application 不依赖平台/SDK，domain 不定义 Durable task。AG-UI 只在 api。实际约束由根目录 `npm run check` 检查。长期职责见 [Server 架构](server-architecture.md)。
+**允许依赖**：api → application/domain；application → domain；runtime → application/domain/storage/adapters；storage/adapters → application/domain；组合根组装具体实现。domain 与 application 不依赖平台/SDK，domain 不定义 Durable task。AG-UI 服务端类型只在 api；独立 cli 仅可引用官方 @ag-ui/client（不得引用内部运行时）。实际约束由根目录 `npm run check` 检查。长期职责见 [Server 架构](server-architecture.md)。
 
 ## 四、验收清单：什么算"Agent 层坐稳了"
 

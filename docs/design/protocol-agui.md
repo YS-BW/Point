@@ -4,6 +4,14 @@
 > 结论：**可行，建议采用，但只用在"边缘投影层"**——内部事件模型不变，AG-UI 是客户端看到的协议。
 > 依据：规范 [transports](https://docs.ag-ui.com/spec/1.0/basic/transports)、[HTTP+SSE](https://docs.ag-ui.com/spec/1.0/basic/transports/http-sse)、[lifecycle](https://docs.ag-ui.com/spec/1.0/events/lifecycle)、[state](https://docs.ag-ui.com/spec/1.0/events/state)、[activity](https://docs.ag-ui.com/spec/1.0/events/activity)、[subagents](https://docs.ag-ui.com/spec/1.0/events/subagents)、[interrupt-resume](https://docs.ag-ui.com/spec/1.0/basic/patterns/interrupt-resume)、[processing](https://docs.ag-ui.com/spec/1.0/basic/processing)。
 
+## 当前实现校正（WP5，用户已确认）
+
+官方类型/校验与编码复用 `@ag-ui/core`（含 `/schemas`）和 `@ag-ui/encoder`；客户端复用 `@ag-ui/client`，精确版本见 package/lock。只保留 Point 到协议的转换、鉴权/幂等和服务端权威视图策略；不引入第二执行引擎或 CopilotKit Agent 运行时。
+
+`outcome` 是对象 `{type: "success" | "cancelled"}`；标准 `usage` 是按 provider/model 分组的数组，当前无法可靠归属，省略。此前汇总对象的验证不能当作官方兼容证据。`protocolVersion` 由 RUN_STARTED 声明。验收数字及纠偏结果以 [验证状态](verification-status.md) 为准。
+
+WP5 已加入结束时可见文本 `MESSAGES_SNAPSHOT`：官方 SDK 默认合并保留客户端消息，Point 消费者通过 `onMessagesSnapshotEvent` 返回 `{messages: event.messages, stopPropagation: true}` 应用服务端权威视图，移除临时草稿。全量工具历史、断线订阅与增量游标仍属于 WP6。观察流 ID 不等于 Durable command 身份；重试复用请求幂等键，不再次执行。
+
 ## 一、规范要点（核实过的事实）
 
 | 项 | AG-UI 1.0 的规定 | 对 Point 的含义 |
@@ -11,7 +19,7 @@
 | 传输 | 标准绑定：`POST RunAgentInput` → `text/event-stream`，每个 SSE `data` 恰好一个 JSON 事件；LF 结尾；忽略 `event:`/`id:`/`retry:` | 我们自己的 SSE 帧可以保留 `id:` 做重放（消费端会忽略，不冲突） |
 | 断线 | **HTTP+SSE 绑定明确无恢复**：不用 `Last-Event-ID`，断流只能换新 `runId` 重开 | 长时间后台工作 + 手机断网，必须有自定义传输（规范允许） |
 | 事件族 | 8 族 31 种：run/step、text、tool call、reasoning、state（`STATE_SNAPSHOT`/`STATE_DELTA`/`MESSAGES_SNAPSHOT`）、activity、subagent、passthrough（`RAW`/`CUSTOM`） | 覆盖对话流、工具、进度、共享状态、后台子任务、扩展事件 |
-| 状态 | `STATE_SNAPSHOT` 整体替换；`STATE_DELTA` 为 RFC 6902 JSON Patch；`MESSAGES_SNAPSHOT` 按 id 幂等对账 | 正好对应"快照 + 增量"，可替代现在的"每次推全量 snapshot" |
+| 状态 | `STATE_SNAPSHOT` 整体替换；`STATE_DELTA` 为 RFC 6902 JSON Patch；`MESSAGES_SNAPSHOT` 按 id 幂等对账；Point 须显式配置权威替换策略 | 正好对应"快照 + 增量"，可替代现在的"每次推全量 snapshot" |
 | 运行边界 | 流必须以 `RUN_STARTED` 或 `RUN_ERROR` 开始；`RUN_FINISHED` 可带 `outcome`（success / interrupt / cancelled）与 `usage` | 停止、等待确认、成本统计都有标准位置 |
 | 一流传多 run | 允许，但必须**顺序**：前一个 run 关闭才能开下一个；回放历史用 snapshot 事件 | 并发后台任务**不能**塞进同一条流 |
 | 人工确认 | interrupt：run 以 interrupt outcome 结束并列出待答项；下一次输入用 `resume` 列表回答 | 对应 Point 的"草稿发送确认""接管请求" |
@@ -64,7 +72,7 @@ AG-UI 要求同一流里的 run 顺序执行，而 Point 的聊天 run 与后台
 ### 3. 服务器是权威，客户端不应写状态
 
 AG-UI 的 `state` 是双向同步的。Point 的状态权威在 Durable documents，客户端只读。做法：
-- 输入里的 `state` 忽略；run 一开始就发 `STATE_SNAPSHOT`（规范允许整体替换），客户端缓存的旧状态被覆盖。
+- 目标（WP6）：输入里的 `state` 忽略；run 一开始就发 `STATE_SNAPSHOT`（规范允许整体替换），客户端缓存的旧状态被覆盖。
 - 输入里的 `messages` 视为"客户端视图"，服务端以 Durable 历史为准，发现分叉就 `MESSAGES_SNAPSHOT` 纠正。
 - 文档里明确这是单用户权威模型，不是多端协同编辑。
 
@@ -88,8 +96,8 @@ Durable entries/tasks/documents ──► 内部规范事件（commit seq + time
 
 | 风险 | 说明 | 缓解 |
 |---|---|---|
-| 规范仍在演进 | 1.0 已有 31 种事件，仍有新增（subagent/activity 较新） | 锁定 `protocolVersion: "1.0"`；vendored JSON Schema 做契约测试；未知事件按规范容忍 |
-| 客户端生态绑定 | 用 CopilotKit 客户端会带来它的运行时假设 | 只采用协议，不采用其运行时；CLI 先作为参考客户端 |
+| 规范仍在演进 | 1.0 已有 31 种事件，仍有新增（subagent/activity 较新） | 锁定 `protocolVersion: "1.0"`；官方 SDK schema 与客户端做契约测试；未知事件按规范容忍 |
+| 客户端生态绑定 | 用 CopilotKit 客户端会带来它的运行时假设 | 复用官方协议 SDK；保持 Durable 为唯一执行引擎；CLI 使用 HttpAgent 验证 |
 | state 体积 | 全量 `STATE_SNAPSHOT` 随任务增长 | 首次快照 + 后续 `STATE_DELTA`；state 只放索引，不放正文 |
 | 消息投影 | Durable 的 system/memory section、工具结果形态与 AG-UI messages 不完全同构 | 只投影可见消息；工具调用走事件族，快照里保留占位顺序 |
 | 无官方续传 | 客户端必须自己处理 `Last-Event-ID` 与同步 run | 参考客户端实现 + 契约测试覆盖"离线后重连" |

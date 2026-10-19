@@ -5,7 +5,7 @@
  * boundary and closes nothing.
  */
 
-import type { AgentRunEvent, AgentUsage } from '../../application/agent-stream.js';
+import type { AgentRunEvent } from '../../application/agent-stream.js';
 import type { AguiEvent } from './events.js';
 import { PROTOCOL_VERSION } from './events.js';
 
@@ -44,7 +44,7 @@ export class RunProjection {
         await this.writer({type: 'TEXT_MESSAGE_CONTENT', messageId: event.messageId, delta: event.delta});
         return;
       case 'message_end':
-        this.remove(entity => entity.kind === 'message' && entity.messageId === event.messageId);
+        if (!this.remove(entity => entity.kind === 'message' && entity.messageId === event.messageId)) return;
         await this.writer({type: 'TEXT_MESSAGE_END', messageId: event.messageId});
         return;
       case 'tool_start': {
@@ -60,12 +60,12 @@ export class RunProjection {
         return;
       }
       case 'tool_end':
-        this.remove(entity => entity.kind === 'tool' && entity.toolCallId === event.toolCallId);
+        if (!this.remove(entity => entity.kind === 'tool' && entity.toolCallId === event.toolCallId)) return;
         await this.writer({type: 'TOOL_CALL_END', toolCallId: event.toolCallId});
         return;
       case 'tool_result':
         await this.writer({
-          type: 'TOOL_CALL_RESULT', messageId: `tool-${++this.toolResultSeq}`,
+          type: 'TOOL_CALL_RESULT', messageId: `tool-${this.identity.runId}-${++this.toolResultSeq}`,
           toolCallId: event.toolCallId, content: event.content, role: 'tool',
         });
         return;
@@ -74,8 +74,12 @@ export class RunProjection {
         await this.writer({type: 'STEP_STARTED', stepName: event.name});
         return;
       case 'step_end':
-        this.remove(entity => entity.kind === 'step' && entity.stepName === event.name);
+        if (!this.remove(entity => entity.kind === 'step' && entity.stepName === event.name)) return;
         await this.writer({type: 'STEP_FINISHED', stepName: event.name});
+        return;
+      case 'messages_snapshot':
+        await this.closeEntities();
+        await this.writer({type: 'MESSAGES_SNAPSHOT', messages: event.messages});
         return;
       case 'run_end':
         return;
@@ -98,21 +102,14 @@ export class RunProjection {
     }
   }
 
-  async finish(outcome: 'success' | 'cancelled', usage: AgentUsage): Promise<void> {
+  async finish(outcome: 'success' | 'cancelled'): Promise<void> {
     await this.closeEntities();
     await this.writer({
       type: 'RUN_FINISHED',
       threadId: this.identity.threadId,
       runId: this.identity.runId,
-      protocolVersion: PROTOCOL_VERSION,
-      outcome,
-      usage: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheReadTokens: usage.cacheReadTokens,
-        cacheWriteTokens: usage.cacheWriteTokens,
-        totalTokens: usage.totalTokens,
-      },
+      outcome: {type: outcome},
+      // Conversation ledger deltas are not attributable per-run token usage.
     });
   }
 
@@ -129,12 +126,13 @@ export class RunProjection {
     return undefined;
   }
 
-  private remove(match: (entity: OpenEntity) => boolean): void {
+  private remove(match: (entity: OpenEntity) => boolean): boolean {
     for (let index = this.open.length - 1; index >= 0; index -= 1) {
       if (match(this.open[index]!)) {
         this.open.splice(index, 1);
-        return;
+        return true;
       }
     }
+    return false;
   }
 }

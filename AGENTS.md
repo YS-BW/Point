@@ -14,7 +14,7 @@
 ## 当前阶段
 
 - `WP0 基线` 已完成（git、证据入库、备份、CI、凭据）。
-- **WP1a + WP1b 五片与 G1 骨架已验收，WP2 Durable resource persistence 已完成并通过 176/176 验证**（`openRuntime.resources` 默认真实 Durable store）。下一片是 WP2 真实 adapter 安全契约与受控执行服务：先落 operation payload/hash、lease/owner/attempt token、evidence/abort/deadline，再做文件/HTTP/CDP adapter；旧库迁移、HTTP API、真实 Steel/RTC 仍按后续 WP。完整产品能力仍在 `infra/pi-durable-validation/`。
+- **WP1a/WP1b、WP2 adapter 安全契约、WP3 状态 v2、WP4 API v1 和 WP5 投影已交付；WP5 官方 SDK 兼容性纠偏已通过自动化验收。** 下一片是 WP6 的完整快照/增量订阅与断线恢复。正式代码、原型与真实外部服务的验收边界及最新闸门状态只见 `docs/design/verification-status.md`，不要从旧测试数量推断产品完成度。
 - **浏览器原生 RTC 集成暂缓**：只做 WP10 止血，不要加功能、不要接控制面。
 
 ## 命令

@@ -429,3 +429,27 @@ test('real runtime replay through the HTTP layer is byte-identical', async t => 
   assert.equal(((await refused.json()) as {error: {code: string}}).error.code, 'API_NOT_CONFIGURED');
   assert.equal((await fetch(`http://127.0.0.1:${plain.port}/health/live`)).status, 200);
 });
+
+
+test('oversized uploads reliably return 413 for declared and chunked bodies', {timeout: 15000}, async t => {
+  const f = await serve(t, {}, {apiToken: TOKEN});
+  const payload = JSON.stringify({name: 'x'.repeat(1024 * 1024 + 10)});
+  for (let index = 0; index < 40; index++) {
+    const response = await call(f, '/v1/chats', {
+      method: 'POST', headers: {...AUTH, ...JSON_HEADERS, 'idempotency-key': 'oversized-upload-1'}, body: payload,
+    });
+    assert.equal(response.status, 413, `upload ${index}`);
+    assert.equal((await json(response)).error?.code, 'PAYLOAD_TOO_LARGE');
+  }
+  // Async iterable forces transfer-encoding: chunked, exercising overflow during read.
+  const body = (async function* () {
+    for (let i = 0; i < payload.length; i += 65536) yield payload.slice(i, i + 65536);
+  })();
+  const response = await call(f, '/v1/chats', {
+    method: 'POST', headers: {...AUTH, ...JSON_HEADERS, 'idempotency-key': 'oversized-chunked-1'},
+    body, duplex: 'half',
+  } as unknown as RequestInit);
+  assert.equal(response.status, 413);
+  assert.equal((await json(response)).error?.code, 'PAYLOAD_TOO_LARGE');
+  assert.equal(f.calls.filter(entry => entry.name === 'chats.create').length, 0);
+});

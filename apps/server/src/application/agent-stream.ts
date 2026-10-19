@@ -16,6 +16,7 @@ export type AgentUsage = Readonly<{
 
 /** One truthful projection event for exactly one foreground run. */
 export type AgentRunEvent =
+  | Readonly<{type: 'messages_snapshot'; messages: {id: string; role: 'user' | 'assistant'; content: string}[]}>
   | Readonly<{type: 'message_start'; messageId: string}>
   | Readonly<{type: 'text_delta'; messageId: string; delta: string}>
   | Readonly<{type: 'message_end'; messageId: string}>
@@ -24,7 +25,7 @@ export type AgentRunEvent =
   | Readonly<{type: 'tool_result'; toolCallId: string; content: string; isError: boolean}>
   | Readonly<{type: 'step_start'; name: string}>
   | Readonly<{type: 'step_end'; name: string}>
-  | Readonly<{type: 'run_end'; outcome: 'success' | 'cancelled'; usage: AgentUsage}>;
+  | Readonly<{type: 'run_end'; outcome: 'success' | 'cancelled'; usage?: AgentUsage}>;
 
 export type AgentRunRequest = Readonly<{chatId: string; text: string; requestId: string}>;
 

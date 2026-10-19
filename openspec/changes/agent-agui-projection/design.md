@@ -125,3 +125,17 @@
 
 - 无未决事件粒度问题：1.1 已核查（见上），文本增量/工具调用/回合边界/usage 均可真实投影；参数流按"单次完整 args"投影，不伪造分片。
 - 实现前待确认：runtime 中性事件端口的写范围（`runtime/agui.ts`、`runtime/open.ts`、`bootstrap.ts`），见"架构后果"；未获批前不实现投影。
+
+## Approved correction (2026-10-19)
+
+The user approved the compatibility correction after review. This section supersedes the earlier no-dependency and wire-shape decisions: pin @ag-ui/core/client/encoder 1.0.3 at the edge; use official schemas/encoder and HttpAgent. Outcome is an object; omit standard usage until per-run attribution is reliable. Use unique provisional stream IDs and canonical Durable entry/message IDs in an authoritative messages snapshot at completion. CLI must reject incomplete streams. Observation timeout/overflow must not claim execution failure or replay work. Full reconnect subscription remains WP6. Scope includes api/agui, application stream port, runtime projection/history, CLI, boundary rules, tests, docs and lockfile, serially. No persistent schema change.
+
+### SDK compatibility details discovered during implementation
+
+HttpAgent 1.0.3 merges MESSAGES_SNAPSHOT by default and preserves client-only drafts. Point explicitly uses the official onMessagesSnapshotEvent mutation callback to replace the view; this is a required Point consumer policy, not a claim that every unconfigured AG-UI client has identical history behavior. Completion snapshots currently cover the existing visible text history. Stable IDs preserve entry IDs, adding an index for multiple messages within one entry. Full tool-history snapshots remain WP6.
+
+Durable resnapshots and bounded observation-buffer overflow fail explicitly with OBSERVATION_RESYNC_REQUIRED; idle observation timeout uses OBSERVATION_TIMEOUT. Neither cancels the task or replays it. Continuous progress has no total two-minute cutoff. Full snapshot-to-live reconnect remains WP6; completed-command retry is fixed here via the existing durable command status.
+
+### Shared HTTP rejection fix discovered in final verification
+
+The final full suite exposed an existing oversized-upload connection-reset race in the shared JSON/HTTP path also used by AG-UI. Scope includes api/json.ts and api/http.ts plus an API regression: early iterator exit must not destroy the socket; discard remaining input without buffering, allowing the existing 413 envelope to reach clients. No REST contract changes.
