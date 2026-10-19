@@ -45,7 +45,7 @@ WP5 已加入结束时可见文本 `MESSAGES_SNAPSHOT`：官方 SDK 默认合并
 | 通知、记忆变更、浏览器租约、归档 | `CUSTOM`（`name: "point.*"`） | 规范明确 `CUSTOM` 是唯一合法的私有扩展通道 |
 | 待确认的发送/接管 | interrupt + `resume` | 与"已确认的草稿发送边界"天然对齐 |
 | 停止 | `RUN_FINISHED` + `outcome: cancelled`（先关闭所有已开实体） | 不能在 teardown 时直接断流，否则只能报 `RUN_ERROR` |
-| 模型成本 | `RUN_FINISHED.usage`（provider/model 维度） | 正好补 A5 的成本账 |
+| 模型成本 | `RUN_FINISHED.usage`（provider/model 维度） | 目标形态；**WP5 暂不发送**——会话账本差分无法归属单次 run，逐 run 精确 usage 属后续能力 |
 | 错误 | `RUN_ERROR`（`message` + 可选 `code`） | 与 Point 的 `{code,message,retryable}` 做映射 |
 
 **不入 AG-UI 的部分**：thread 列表、历史分页、产物下载、鉴权、健康检查、管理面——继续用 REST。AG-UI 只管"一次运行/一个线程的流"。

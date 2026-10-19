@@ -56,7 +56,7 @@
 
 - `wp/5-agui-projection`（`b5e1211`）经两轮独立验证（10/10、15/15）与两轮审计（各 1 blocker，修复后终审通过）合并进 main。
 - 根目录 `npm run check`、`npm test`：**316/316**；原型 28/28；`agent-agui-projection` OpenSpec strict 通过。
-- **G2（契约就绪）宣布通过**：REST（WP4 15/15）+ AG-UI（13/13）契约测试通过，参考 CLI 消费新协议。口径注意：此前无产品 CLI 可切换，原型 CLI 未替换。
+- **G2（契约就绪）宣布通过**：REST（WP4 15/15）+ AG-UI（13/13）契约测试通过，参考 CLI 消费新协议。口径注意：此前无产品 CLI 可切换，原型 CLI 未替换。（该 G2 口径已被下方「WP5 官方 SDK 纠偏与 CLI 移除」取代。）
 - 下一个闸门 G3 = WP3 + WP6（读模型 + 增量事件/线程流/`Last-Event-ID`/运行流），WP6 已解锁。
 - 证据：[wp5-agui-g2](../../infra/pi-durable-validation/evidence/wp5-agui-g2-2026-10-19T07-22-51Z.json)。
 

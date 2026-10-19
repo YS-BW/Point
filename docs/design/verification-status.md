@@ -198,9 +198,9 @@
 证据：`infra/pi-durable-validation/evidence/wp3-wp4-gate-<ts>.json`（追加式，manifest 登记）。
 
 
-## WP5 AG-UI 投影与 G2 契约闸门（2026-10-19）
+## WP5 AG-UI 投影与 G2 契约闸门（2026-10-19，历史记录；契约结论已被下方「WP5 纠偏收口」取代）
 
-**范围**：`POST /v1/agent` 将一次前台运行投影为 AG-UI 1.0 事件流（`RUN_STARTED`/`TEXT_MESSAGE_*`/`TOOL_CALL_*`/`STEP_*`/`RUN_FINISHED(outcome+usage)`/`RUN_ERROR`），严格 LIFO 实体关闭、容忍未知/拒绝坏值、截断不伪造完成、传输级失败仍走 REST 信封、预留 `point.ui.*` 声明式契约（不实现渲染）、参考 CLI 作为首个消费者。
+**范围（历史口径）**：`POST /v1/agent` 将一次前台运行投影为 AG-UI 1.0 事件流（`RUN_STARTED`/`TEXT_MESSAGE_*`/`TOOL_CALL_*`/`STEP_*`/`RUN_FINISHED`/`RUN_ERROR`），严格 LIFO 实体关闭、容忍未知/拒绝坏值、截断不伪造完成、传输级失败仍走 REST 信封、预留 `point.ui.*` 声明式契约（不实现渲染）。当时所说的“参考 CLI 作为首个消费者”与 `RUN_FINISHED.usage` 均已作废。
 
 | 证据项 | 数值 / 结果 | 证据 |
 |---|---|---|
@@ -212,11 +212,11 @@
 | 独立代码审计 | 首轮 1 blocker（实体关闭按类型分组）→ 修复；复审 1 blocker（`point.ui` 未拒 `document.`）→ 修复；[最终](wp5-agui-projection-final.md) **通过（无 blocker）** | [评审](wp5-agui-projection.md)、[复审](wp5-agui-projection-reaudit.md)、[终审](wp5-agui-projection-final.md) |
 | OpenSpec strict | `agent-agui-projection` valid 且 complete | `openspec validate --strict` |
 
-**G2（契约就绪）= WP4 + WP5：判定通过。** REST 契约（WP4 15/15）与 AG-UI 契约（13/13）测试通过，参考 CLI（`apps/server/src/cli.ts`）消费新协议。**口径说明**：此前没有产品 CLI 可"切换"，原型 CLI 明确未替换；若"CLI 已切到新协议"要求替换某个既有产品 CLI，此项仍是后续动作。
+**G2（契约就绪）= WP4 + WP5：判定通过（历史口径）。** REST 契约（WP4 15/15）与 AG-UI 契约（13/13）测试通过；当时以参考 CLI 消费新协议（该 CLI 其后按用户决定删除）。**口径说明**：此前没有产品 CLI 可"切换"，原型 CLI 明确未替换；若"CLI 已切到新协议"要求替换某个既有产品 CLI，此项仍是后续动作。
 
 > **本节已被下方「WP5 纠偏收口」修订**：当时所称的“参考 CLI 消费新协议”已按用户决定取消（Web-first），`RUN_FINISHED` 不再发送标准 `usage`。旧数字与结论作为历史记录保留。
 
-**usage 口径**：`RUN_FINISHED.usage` 是会话 `UsageState` 账本差分（按 model/tool bucket 聚合），**派生值**，不是 provider 精确账单（无 cost、不拆单次调用，retry/compaction 归属可能与账单不同）。
+**usage 口径（历史，已作废）**：当时发送的 `RUN_FINISHED.usage` 是会话 `UsageState` 账本差分；因无法归属单次运行，现已不发送。
 
 **未验证项**：真实 provider 逐 token 流/网络断线重连/限流（仅 faux）；真实工具执行到 `TOOL_CALL_*` 端到端（前台 chat run 不注册 tool extension，工具顺序由 projection 与脚本化 port 覆盖）；usage 与 provider 账单对账；多客户端/follow-up run 隔离；SSE 反向代理缓冲/背压/半开/EPIPE（`response` 未装 `error` 监听）；重复 end 事件可能双发 END；`point.ui` 方括号 DOM 形式未覆盖且当前无发射路径；`Last-Event-ID`/快照/`ACTIVITY`/运行流（WP6）与 interrupt/resume（WP7）不在本片；高频并发与长跑未测。
 
