@@ -31,6 +31,21 @@ jobs:
       - name: offline suite (1 crash round)
         run: POINT_CRASH_ROUNDS=1 npm test
 
+  foundation:
+    name: server foundation (node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+
   secret-scan:
     name: credential scan
     runs-on: ubuntu-latest

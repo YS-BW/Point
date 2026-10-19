@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T17:01:51.830Z",
+  "generatedAt": "2026-10-19T00:38:59.051788+00:00",
   "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
   "files": [
     {
@@ -50,6 +50,55 @@
       "sha256": "f4429c419fe6dc4fcd19f07582923d4a4aa0cd439e223965f4e987ce84458cb8",
       "source": "runtime/acceptance-summary.json",
       "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-foundation-2026-10-18T19-38-14Z.json",
+      "bytes": 12323,
+      "sha256": "b1ec9e61af395746fdfed2f5a2edca63d1f9aaeff99e4dd046aaa7917aa8b6dc",
+      "source": "WP1a command output captured at execution; see results[].command",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-final-2026-10-18T19-39-30Z.json",
+      "bytes": 3629,
+      "sha256": "b8b7322d05f508a92bc45a84f3589f7f86d98b570203a9535cd3da1d7073feef",
+      "source": "WP1a command output captured at execution; see results[].command",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-preflight-2026-10-18T19-41-41Z.json",
+      "bytes": 4214,
+      "sha256": "0a7384e9726048d140ed2ab4c6f1fb0b54cf13a2292d7dea7040611f79568712",
+      "source": "recorded check/test command output",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-lifecycle-2026-10-18T19-44-11Z.json",
+      "bytes": 13112,
+      "sha256": "346b517912e7d2da3c6e516a36fb89817d8767a79cd31f34f4ce97f5d9817d2d",
+      "source": "recorded check/test output",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-clean-build-2026-10-18T19-45-56Z.json",
+      "bytes": 5532,
+      "sha256": "0707a523a47762292a7298631185fc0206be3f23b6d4bb5158748bbeb53baa11",
+      "source": "build failure injection and final check/test output",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-precommit-2026-10-18T19-48-10Z.json",
+      "bytes": 13604,
+      "sha256": "620627c4d2c52e613d73dc89feaf0421b7aa7ee0fe78f77493cde5b2a5772166",
+      "source": "WP1a precommit command outputs",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp1a-clean-checkout-2026-10-19T00-38-59Z.json",
+      "bytes": 5227,
+      "sha256": "b2a234180d1aebed569db0083f5dd0a9612505625d1b38c20c8306fcebd3f43c",
+      "source": "git checkout-index to independent temporary directory, npm ci/check/test",
+      "normalized": "absolute home prefix and temporary checkout path normalized"
     }
   ]
 }

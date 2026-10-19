@@ -19,6 +19,28 @@
 
 【事实】28 项与 70 次均可复跑：按上表命令在本机 Node v22.22.3 上 exit 0（28/28 pass，10 轮耗时约 46 秒）。
 
+## WP1a 正式骨架验收（2026-10-19 本地日期）
+
+| 证据项 | 数值 / 结果 | 时点 (UTC) | 证据 | 边界 |
+|---|---|---|---|---|
+| 正式骨架独立测试 | **13 项通过，0 fail / 0 skip**；包含初始化事务提交前中断、启动后 SIGKILL、SIGTERM、锁竞争、版本拒绝、端口占用释放、健康接口和依赖边界反例 | 2026-10-18T19:39Z | [最终命令输出](../../infra/pi-durable-validation/evidence/wp1a-final-2026-10-18T19-39-30Z.json) | 根目录 `npm run check && npm test`；真实 Durable + 临时目录，未安装模型或产品 tasks；不是原型迁移验收 |
+| 锁定安装与类型/边界检查 | `npm ci --ignore-scripts`、`npm run check` exit 0 | 2026-10-18T19:38Z | [完整回归输出](../../infra/pi-durable-validation/evidence/wp1a-foundation-2026-10-18T19-38-14Z.json) | 本机 Node；CI 配置已加入 foundation job，但未在远程 GitHub runner 执行 |
+| 原型规定回归 | **28 项通过，0 fail / 0 skip**，`POINT_CRASH_ROUNDS=1`；语法检查通过 | 2026-10-18T19:38Z | 同上完整回归输出 | 未改变原型实现；这是 1 轮快速回归，不替代上表的 10 轮证据 |
+
+**后续稳定性迭代**：2026-10-18T19:41Z，根目录类型/边界检查与 **16 项测试全部通过**（0 fail / 0 skip）。新增只读 SDK schema 预检：未知数据库、旧版和新版 schema 在进入写模式前拒绝，测试比较拒绝前后数据库字节不变；新增未注册模块层和绝对导入的边界反例。证据：[预检与边界回归](../../infra/pi-durable-validation/evidence/wp1a-preflight-2026-10-18T19-41-41Z.json)。此前骨架数字为历史验收，不覆盖本次新增行为；原型实现未变。
+
+**生命周期迭代**：2026-10-18T19:44Z，正式骨架 **19 项测试通过，0 fail / 0 skip**，类型/边界检查通过；新增启动时 runtime 关闭、运行中异常终止、重复关闭和清理失败的结果传播。原型语法检查与 **28 项快速回归** 同时通过（1 轮强杀）。证据：[生命周期与原型回归](../../infra/pi-durable-validation/evidence/wp1a-lifecycle-2026-10-18T19-44-11Z.json)。逐项范围审计见 [foundation-acceptance](foundation-acceptance.md)。
+
+**构建一致性迭代**：2026-10-18T19:45Z，先复现构建成功仍保留已删除模块的旧 JS，修复后验证旧输出被移除；故意加入类型错误时构建按预期 exit 1 且不生成入口，移除夹具后 `check` 与 **19 项测试** 全部通过。证据：[干净构建与失败注入](../../infra/pi-durable-validation/evidence/wp1a-clean-build-2026-10-18T19-45-56Z.json)。该证据中的失败命令是预期断言，不是遗留失败。
+
+**本地提交前复核**：2026-10-18T19:48Z，正式骨架类型/边界检查、19 项测试、原型语法检查与 28 项快速回归、OpenSpec strict 和 diff check 全部通过。证据：[提交前检查](../../infra/pi-durable-validation/evidence/wp1a-precommit-2026-10-18T19-48-10Z.json)。
+
+**干净检出验证**：2026-10-19T00:38:59.051788+00:00，修复 runtime 源码被忽略的问题后，从 Git 暂存内容导出独立目录，`npm ci --ignore-scripts`、`npm run check` 与 **19 项测试** 全部通过。该副本不含本机 node_modules 或未暂存文件。证据：[独立检出结果](../../infra/pi-durable-validation/evidence/wp1a-clean-checkout-2026-10-19T00-38-59Z.json)。
+
+**完成范围**：WP1a 架构与基础生命周期；**WP1b、WP1 整体与 G1 未完成**。未迁移旧库、未启用聊天/模型/工具/计划/投递；未构建 Web；未验证 Docker、公网鉴权、浏览器原生 RTC、真实模型、长期运行和跨版本迁移。NanoMuse 为固定源码分析，未运行其测试。
+
+本次所有数据库验证使用新临时目录，不打开个人原型数据；覆盖 latest 之前已把原型 latest JSON 备份到 `/tmp/point-pre-wp1a-tests-2026-10-18T19-38-14Z/`。正式骨架与原型证据分别记录，不相互替代。
+
 ## 已被取代、不要引用的旧口径
 
 - `runtime/acceptance-summary.json` 写 `testsPassed 24/24`，是 2026-10-18T03:08Z 的旧口径（当时还没有后 4 项）。**不要引用。**

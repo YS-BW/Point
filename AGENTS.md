@@ -14,13 +14,13 @@
 ## 当前阶段
 
 - `WP0 基线` 已完成（git、证据入库、备份、CI、凭据）。
-- 下一步是 **WP1（Server 骨架）**。当前活跃实现仍在 `infra/pi-durable-validation/`，正式代码尚未开始。
+- **WP1a（架构与基础骨架）已落地**，验收见 verification-status；下一步为 **WP1b（原型完整迁移）**。产品能力仍在 `infra/pi-durable-validation/`；`apps/server/` 当前只有基础生命周期，不代表完整 WP1/G1 已完成。
 - **浏览器原生 RTC 集成暂缓**：只做 WP10 止血，不要加功能、不要接控制面。
 
 ## 命令
 
 ```bash
-# 原型（当前唯一可运行实现）
+# 原型（当前产品能力实现）
 cd infra/pi-durable-validation
 npm ci --ignore-scripts
 npm run check                 # 语法检查
@@ -34,10 +34,22 @@ npm run backup -- --data runtime/deepseek --out backups
 npm run check && POINT_CRASH_ROUNDS=1 npm test
 ```
 
+正式骨架在仓库根目录运行（与原型回归分开）：
+
+```bash
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run build && npm start
+```
+
+正式代码改动需通过根目录检查，并继续运行上面的原型规定回归。Server 分层与依赖规则见 [长期架构](docs/design/server-architecture.md)。
+
 ## 仓库结构
 
 | 路径 | 内容 | 能不能改 |
 |---|---|---|
+| `apps/server/` | 正式 Server；WP1a 基础、WP1b 待迁移 | 可以，遵守模块边界 |
 | `infra/pi-durable-validation/` | 活跃原型：Agent、CLI、浏览器适配、验收 | 可以（但 WP1 开始后新代码进 `apps/server/`） |
 | `infra/pi-durable-validation/evidence/` | 验收证据（只增不覆盖） | 只增 |
 | `docs/design/` | 现行设计、ADR、路线、验证口径 | 可以，但按 §5.4 |

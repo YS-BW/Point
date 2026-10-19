@@ -1,0 +1,32 @@
+{
+  "scope": "Fresh staged checkout with no local files or node_modules",
+  "results": [
+    {
+      "command": [
+        "npm",
+        "ci",
+        "--ignore-scripts"
+      ],
+      "exitCode": 0,
+      "output": "\nadded 93 packages, and audited 95 packages in 1s\n\n5 packages are looking for funding\n  run `npm fund` for details\n\nfound 0 vulnerabilities\nnpm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead\n"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "output": "\n> point@0.0.0 check\n> tsc -p apps/server/tsconfig.json --noEmit && node scripts/check-boundaries.mjs\n\nArchitecture boundaries passed\n"
+    },
+    {
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exitCode": 0,
+      "output": "\n> point@0.0.0 test\n> npm run build && node --test apps/server/dist/test/*.test.js scripts/*.test.mjs\n\n\n> point@0.0.0 build\n> node scripts/clean-build.mjs && tsc -p apps/server/tsconfig.json\n\nTAP version 13\n# (node:54207) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n# (Use `node --trace-warnings ...` to show where the warning was created)\n# Subtest: configuration rejects external host, invalid port and blank directory\nok 1 - configuration rejects external host, invalid port and blank directory\n  ---\n  duration_ms: 0.442209\n  type: 'test'\n  ...\n# Subtest: runtime preserves identity and excludes a second owner; close is idempotent\nok 2 - runtime preserves identity and excludes a second owner; close is idempotent\n  ---\n  duration_ms: 14.923875\n  type: 'test'\n  ...\n# Subtest: unrecognized populated storage is refused and owner released\nok 3 - unrecognized populated storage is refused and owner released\n  ---\n  duration_ms: 6.779875\n  type: 'test'\n  ...\n# Subtest: unsupported metadata is not rewritten on failed startup\nok 4 - unsupported metadata is not rewritten on failed startup\n  ---\n  duration_ms: 7.371208\n  type: 'test'\n  ...\n# Subtest: health is truthful and unsupported routes and methods are rejected\nok 5 - health is truthful and unsupported routes and methods are rejected\n  ---\n  duration_ms: 18.64075\n  type: 'test'\n  ...\n# Subtest: failed HTTP bind releases storage ownership\nok 6 - failed HTTP bind releases storage ownership\n  ---\n  duration_ms: 9.970375\n  type: 'test'\n  ...\n# Subtest: SIGKILL releases directory ownership and restart preserves identity\nok 7 - SIGKILL releases directory ownership and restart preserves identity\n  ---\n  duration_ms: 109.890166\n  type: 'test'\n  ...\n# Subtest: foreign session-only documents are not adopted\nok 8 - foreign session-only documents are not adopted\n  ---\n  duration_ms: 3.356667\n  type: 'test'\n  ...\n# Subtest: interrupted initialization cannot leave a root without metadata\nok 9 - interrupted initialization cannot leave a root without metadata\n  ---\n  duration_ms: 104.777333\n  type: 'test'\n  ...\n# Subtest: entrypoint handles SIGTERM and logs no supplied config value\nok 10 - entrypoint handles SIGTERM and logs no supplied config value\n  ---\n  duration_ms: 228.716334\n  type: 'test'\n  ...\n# Subtest: unknown database is rejected before SDK writes to it\nok 11 - unknown database is rejected before SDK writes to it\n  ---\n  duration_ms: 4.168666\n  type: 'test'\n  ...\n# Subtest: older and newer SDK schemas require explicit migration before writable open\nok 12 - older and newer SDK schemas require explicit migration before writable open\n  ---\n  duration_ms: 2.628917\n  type: 'test'\n  ...\n# Subtest: unexpected runtime termination closes HTTP and reports failure\nok 13 - unexpected runtime termination closes HTTP and reports failure\n  ---\n  duration_ms: 1.056959\n  type: 'test'\n  ...\n# Subtest: runtime already closed during startup cannot report readiness\nok 14 - runtime already closed during startup cannot report readiness\n  ---\n  duration_ms: 0.486875\n  type: 'test'\n  ...\n# Subtest: shutdown failure is observable and concurrent close only disposes once\nok 15 - shutdown failure is observable and concurrent close only disposes once\n  ---\n  duration_ms: 0.377375\n  type: 'test'\n  ...\n# Subtest: boundary rejects static imports, reexports and import types across layers\nok 16 - boundary rejects static imports, reexports and import types across layers\n  ---\n  duration_ms: 2.997958\n  type: 'test'\n  ...\n# Subtest: boundary rejects dynamic and nonliteral imports\nok 17 - boundary rejects dynamic and nonliteral imports\n  ---\n  duration_ms: 0.691167\n  type: 'test'\n  ...\n# Subtest: boundary permits inward imports and SDK only at implementation edge\nok 18 - boundary permits inward imports and SDK only at implementation edge\n  ---\n  duration_ms: 0.7425\n  type: 'test'\n  ...\n# Subtest: new folders and absolute imports cannot silently bypass layering\nok 19 - new folders and absolute imports cannot silently bypass layering\n  ---\n  duration_ms: 0.120667\n  type: 'test'\n  ...\n1..19\n# tests 19\n# suites 0\n# pass 19\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 698.788708\n"
+    }
+  ],
+  "at": "2026-10-19T00:38:59.051788+00:00"
+}

@@ -1,7 +1,15 @@
 # 实施路线（工作包制，不排时间）
 
-> 2026-10-19 修订（第二版）：**不按周排期**。这个项目由人类与 agent 协作推进，进度用"工作包 + 闸门"衡量，而不是日历。
+> 2026-10-19 修订（第三版）：**不按周排期**。这个项目由人类与 agent 协作推进，进度用"工作包 + 闸门"衡量，而不是日历。
 > 约束见 [Agent 层架构基调](agent-core.md)；客户端协议见 [AG-UI 评估](protocol-agui.md)；证据口径见[验证状态](verification-status.md)。
+
+## 当前交付与长期方向
+
+**2026-10-19 用户确认**：本次交付仅包含基础骨架与稳定性验收（WP1a）；产品迁移（WP1b）单独实施。WP1a 的完成不再因待迁移产品能力而阻塞，但不代表 WP1 整体或 G1 已完成。
+
+本次按用户要求将架构与骨架落地为 **WP1a**，将原 WP1 的完整迁移保留为 **WP1b**。这不是缩减 WP1 的出口：原型全部离线回归仍须在正式服务独立通过。WP1a 完成不代表 WP1、G1 或完整 Agent 可用。实际验收见 [验证状态](verification-status.md)。
+
+架构以 [server-architecture](server-architecture.md) 和 [ADR-002](adr/ADR-002-server-foundation.md) 为准。WP1a 的 root 构建、CI、文档与应用代码由一个 owner 串行修改；不启动团队流程提案，不占用浏览器 lane。
 
 ## 0. 推进方式
 
@@ -28,7 +36,8 @@
 | WP | 内容 | 依赖 | 出口判据（可运行） | 修改范围 |
 |---|---|---|---|---|
 | **WP0** ✅ | 基线：仓库、证据入库、备份脚本、CI、凭据 | — | 全新克隆 `npm ci && check && test` 全绿 | 已完成 |
-| **WP1** | Server 骨架：`apps/server/src/{api,domain,runtime,adapters,storage}`；`service.mjs` 拆组合根 + tasks/domain；配置与数据目录固定；结构化日志骨架 | WP0 | 28 项离线测试在新结构全绿；`domain/` 无 `defineTask`；单测不 spawn 服务 | `apps/server/**`（新建） |
+| **WP1a** | 长期架构、模块边界、TypeScript Server 基础生命周期、独立测试 | WP0 | 根目录 `npm ci --ignore-scripts && npm run check && npm test`；真实 Durable 初始化/锁/关闭/版本拒绝；原型规定回归仍绿 | `apps/server/**`、根构建/CI、设计/OpenSpec、新增证据（串行） |
+| **WP1b** | 将原型产品链路迁入正式模块：会话、后台工作、上下文/显式记忆、投递；保留现有行为 | WP1a | 原型全部离线回归在正式结构独立通过；domain 无 defineTask；纯规则单测不 spawn 服务；无对原型源码/测试钩子依赖 | `apps/server/**`；迁移不改功能，数据库迁移另交 WP3 |
 | **WP2** | 资源抽象：`resource{owner,lease,controlEpoch,state}` 接口 + `adapters/resource`；文件/通知/浏览器统一"意图→执行→三态"；domain 不 import 具体实现 | WP1 | 同一接口能用内存桩跑通租约、过期、`unknown`；`grep` 证明 domain 无 steel/cdp | `apps/server/src/adapters/**`、`domain/**` |
 | **WP3** | 状态 v2 + 迁移：`point.meta/chats/chat/memory/job/jobs/browser/requests` 分片；事件改时间线；单 commit 迁移；升级前自动备份；版本闸门 | WP1（与 WP4 可并行，但**事务组唯一 owner**） | v1 夹具库升级语义等值；重启两次迁移幂等；恢复 pre-v2 快照可启动；请求账本有清扫 | `apps/server/src/storage/**`、`runtime/**` |
 | **WP4** | API v1 基础契约：`/v1`、错误码对象、所有写操作幂等键、`/inspect` 门控、鉴权、访问日志 | WP1 | 契约测试覆盖 400/404/409/413/503；重放响应逐字节相等 | `apps/server/src/api/**` |
@@ -43,12 +52,12 @@
 
 ```mermaid
 flowchart LR
-    WP0[WP0 基线 ✅] --> WP1[WP1 骨架]
+    WP0[WP0 基线 ✅] --> WP1[WP1a 基础 → WP1b 迁移]
     WP1 --> WP2[WP2 资源抽象]
     WP1 --> WP3[WP3 状态 v2]
     WP1 --> WP4[WP4 API v1]
     WP1 --> WP8[WP8 运维]
-    WP1 --> WP10[WP10 浏览器止血]
+    WP0 --> WP10[WP10 浏览器止血]
     WP4 --> WP5[WP5 AG-UI 投影]
     WP3 --> WP6[WP6 读模型 + 增量]
     WP4 --> WP6
@@ -66,21 +75,21 @@ flowchart LR
 |---|---|---|---|
 | **A 状态与读模型** | WP3 → WP6 | `storage/**`、`api/**` 的事件投影部分 | **schema/事务组唯一 owner**，其他 lane 不得改 |
 | **B 接口与协议** | WP4 → WP5 | `api/http/**`、`api/agui/**` | 只读 A 的存储接口，不改 schema |
-| **C 领域行为** | WP2 → WP7 | `domain/**`、`adapters/**` | 依赖 B 的契约草案，不改 api |
+| **C 领域行为** | WP2 → WP7 | `domain/**`、`application/**`、`adapters/**` | 依赖 B 的契约草案，不改 api |
 | **D 运维与止血** | WP8、WP10 | `Dockerfile`、`deploy/**`、`infra/**` | 不改应用逻辑 |
 
 **闸门**：
 
-- **G1 骨架就绪**：WP1 + WP2。`domain` 与具体实现解耦，资源接口可用桩验证。
+- **G1 骨架就绪**：WP1a + WP1b + WP2。`domain` 与具体实现解耦，资源接口可用桩验证。
 - **G2 契约就绪**：WP4 + WP5。REST 与 AG-UI 的契约测试通过，CLI 已切到新协议。
 - **G3 状态就绪**：WP3 + WP6。迁移可回滚，增量事件与重连同步通过。
 - **G4 行为与运营就绪**：WP7 + WP8。状态转移表、`unknown` 用例、容器重启、备份恢复全部通过。
-- **G5 稳定**：WP9。7 天挂机与故障注入通过，方可称为"底层"。
+- **G5 运行基线通过**：WP9。完成约定长跑与故障注入，得到该环境下的运行证据；不等于完整产品、任意任务或永久可靠。
 
 ## 4. 串行规则（违反就会返工）
 
 1. **状态 schema 与事务组**：WP3 与 WP6 必须同一 owner 顺序推进；其他 lane 在 G3 前不得改 schema。
-2. **接口冻结点**：WP1 的 ports → 各 lane 才能并行；WP2 的资源接口 → adapter 才能写；WP4 的 API 形状 → WP5 才能写；WP5 的事件形状 → Web 才能接。
+2. **接口冻结点**：WP1b 的 ports 验收完成 → 各 lane 才能并行；WP2 的资源接口 → adapter 才能写；WP4 的 API 形状 → WP5 才能写；WP5 的事件形状 → Web 才能接。
 3. **一个 WP = 一个分支/PR**：迁移提交必须独立，不夹带功能改动。
 4. **契约变更需 owner 批准**：改测试断言等于改契约，必须由对应 lane owner 确认。
 5. **副作用三态与资源租约先于所有 adapter**：否则每加一个外部能力都要改 domain。
@@ -144,3 +153,27 @@ flowchart LR
 6. 引入第二执行引擎。
 7. 用"第几周"衡量进度——只看闸门。
 8. agent 自行扩大范围或修改契约测试。
+
+
+## 8. 长期产品路线（不止一个阶段）
+
+以下是后续候选 WP，不因写进路线即视为已授权实现。每个开始前补齐 Ready 和契约；依赖表中的 WP1 均指 WP1a+WP1b。已实施的真实测试数字只引用验证状态。
+
+| WP | 产品结果 | 前置 | 验收重点与范围 |
+|---|---|---|---|
+| WP11 承诺闭环 | 对话发现明确承诺、纠正/完成、时间解释、提前准备草稿、最多规定次数跟进 | G3、WP7、WP9 | 模糊意愿不建任务，无日期不催促，错过提醒合并，修订不发旧提醒；domain/application/runtime，语义评测与 Durable 故障测试 |
+| WP12 长期目标 | 目标→计划→有界工作→结果核验→下一步；暂停/恢复与计划修订 | WP11、预算/决策审计 | 用户目标不被 task settled 自动完成；等待用户持久化；无进展/预算耗尽停止；跨重启/多次 attempt 仍可解释 |
+| WP13 首个 Web 客户端 | 主会话、侧聊、工作与产物，离线后可重建 | G2、G3、WP7 | 先 CLI 契约消费，再 apps/web；真实断线重连、停止/取消作用域、错误可见；不搬服务端事实到浏览器 |
+| WP14 浏览器正式集成 | Steel 工作环境与人工接管 | G4、WP10、WP2、WP13 | 单一资源控制入口；旧 epoch 拒绝；unknown 核销；重启资源对账；发布镜像实测；此前保持冻结 |
+| WP15 个性化与上下文质量 | 显式 Profile/USER.md 导入导出、来源、遗忘、上下文预算与纠错 | G3、WP7 | 没有第二权威；保存/导入/删除幂等；压缩不删历史；相关性/误记回归。自动记忆需新 ADR |
+| WP16 单向通知 | 至少一个可用渠道，结果在会话完整保留 | WP11、WP7、WP8 | decision 与 delivery 分离；陈旧消息丢弃；回执丢失 unknown；通知失败不丢对话结果 |
+| WP17 外部数据源与扩展 | 按需接邮箱/其他平台、MCP/skills | G4、WP12、WP15 | 来源可追溯、权限/幂等/撤销、资源与预算；无新队列/引擎；不默认把通知邮箱当数据源 |
+| WP18 个人长期使用验收 | Docker 部署、恢复、升级、导出与持续使用闭环 | G5、WP11–WP16 中实际启用部分 | 原型能力之外，真实用户从交代到完成/纠正的体验、成本、恢复演练与依赖升级；范围清单明确后再给版本标签 |
+
+**产品闸门**：P1（会话/工作/主动跟进闭环）= WP11 + WP13 + WP16；P2（长期目标与环境）= WP12 + WP14 + WP15；P3（可长期自托管）= WP18。WP17 按具体需要增加，不阻塞无外部数据源的自用版本。没有自动把 G5 对应为 v1.0 的规则。
+
+## 9. 每个工作包的落地顺序
+
+先固定行为案例与失败语义，再写领域规则和 ports，再实现 Durable 事务与 task，最后实现 adapter/API/客户端。新增持久状态前设计迁移，新增外部动作前写 unknown 用例。针对每个交付，回答：谁是权威、谁持有事务、如何去重、取消/修订后如何拒绝旧结果、重启时如何恢复、如何证明用户目标完成。
+
+不先搭建通用插件市场、自动多 Agent 团队或分布式平台。只有真实用例需要的抽象进入工程；后续改变外部能力时通过 resource/delivery/context 边界扩展，而不是修改 Durable 内核。

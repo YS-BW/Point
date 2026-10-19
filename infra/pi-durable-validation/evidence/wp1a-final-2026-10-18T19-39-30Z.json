@@ -1,0 +1,23 @@
+{
+  "at": "2026-10-18T19:39:32.551631+00:00",
+  "scope": "Final foundation after fixture cleanup ordering fix; prototype unchanged from preceding recorded regression",
+  "results": [
+    {
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "output": "\n> point@0.0.0 check\n> tsc -p apps/server/tsconfig.json --noEmit && node scripts/check-boundaries.mjs\n\nArchitecture boundaries passed\n"
+    },
+    {
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exitCode": 0,
+      "output": "\n> point@0.0.0 test\n> npm run build && node --test apps/server/dist/test/*.test.js scripts/*.test.mjs\n\n\n> point@0.0.0 build\n> tsc -p apps/server/tsconfig.json\n\nTAP version 13\n# (node:47338) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n# (Use `node --trace-warnings ...` to show where the warning was created)\n# Subtest: configuration rejects external host, invalid port and blank directory\nok 1 - configuration rejects external host, invalid port and blank directory\n  ---\n  duration_ms: 0.597125\n  type: 'test'\n  ...\n# Subtest: runtime preserves identity and excludes a second owner; close is idempotent\nok 2 - runtime preserves identity and excludes a second owner; close is idempotent\n  ---\n  duration_ms: 11.04225\n  type: 'test'\n  ...\n# Subtest: unrecognized populated storage is refused and owner released\nok 3 - unrecognized populated storage is refused and owner released\n  ---\n  duration_ms: 5.783792\n  type: 'test'\n  ...\n# Subtest: unsupported metadata is not rewritten on failed startup\nok 4 - unsupported metadata is not rewritten on failed startup\n  ---\n  duration_ms: 6.826959\n  type: 'test'\n  ...\n# Subtest: health is truthful and unsupported routes and methods are rejected\nok 5 - health is truthful and unsupported routes and methods are rejected\n  ---\n  duration_ms: 15.317334\n  type: 'test'\n  ...\n# Subtest: failed HTTP bind releases storage ownership\nok 6 - failed HTTP bind releases storage ownership\n  ---\n  duration_ms: 9.145292\n  type: 'test'\n  ...\n# Subtest: SIGKILL releases directory ownership and restart preserves identity\nok 7 - SIGKILL releases directory ownership and restart preserves identity\n  ---\n  duration_ms: 104.467458\n  type: 'test'\n  ...\n# Subtest: foreign session-only documents are not adopted\nok 8 - foreign session-only documents are not adopted\n  ---\n  duration_ms: 3.079292\n  type: 'test'\n  ...\n# Subtest: interrupted initialization cannot leave a root without metadata\nok 9 - interrupted initialization cannot leave a root without metadata\n  ---\n  duration_ms: 101.343542\n  type: 'test'\n  ...\n# Subtest: entrypoint handles SIGTERM and logs no supplied config value\nok 10 - entrypoint handles SIGTERM and logs no supplied config value\n  ---\n  duration_ms: 212.516042\n  type: 'test'\n  ...\n# Subtest: boundary rejects static imports, reexports and import types across layers\nok 11 - boundary rejects static imports, reexports and import types across layers\n  ---\n  duration_ms: 2.812\n  type: 'test'\n  ...\n# Subtest: boundary rejects dynamic and nonliteral imports\nok 12 - boundary rejects dynamic and nonliteral imports\n  ---\n  duration_ms: 0.671541\n  type: 'test'\n  ...\n# Subtest: boundary permits inward imports and SDK only at implementation edge\nok 13 - boundary permits inward imports and SDK only at implementation edge\n  ---\n  duration_ms: 0.65825\n  type: 'test'\n  ...\n1..13\n# tests 13\n# suites 0\n# pass 13\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 652.238875\n"
+    }
+  ]
+}

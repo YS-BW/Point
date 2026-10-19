@@ -1,6 +1,6 @@
 # Point 产品与技术设计
 
-> 更新：2026-10-18。已定：**Pi Durable 作为 Agent 层，Steel 作为浏览器基础设施**。
+> 更新：2026-10-19。已定：**Pi Durable 作为 Agent 层，Steel 作为浏览器基础设施**。
 > 状态口径：**已定**是产品或架构决定；**已验证**只覆盖对应实验；**待实现/待验证**不是可用性保证。
 
 ## 产品定位与架构决定
@@ -20,6 +20,8 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 
 | 文档 | 内容 |
 |---|---|
+| [长期 Server 架构](server-architecture.md) | 模块、身份、事务、恢复、主动性与长期演进 |
+| [ADR-002](adr/ADR-002-server-foundation.md) | 模块化单体、WP1a/WP1b 与 NanoMuse 借鉴边界 |
 | [产品与架构](product-and-architecture.md) | Point / Durable / Steel 职责、部署、状态权威与客户端范围 |
 | [运行时选型](runtime-selection.md) | Durable 的复用边界、版本、现有证据与迁移顺序 |
 | [浏览器基础设施](browser-infrastructure.md) | 国内镜像、REST/CDP/RTC、资源归属、接管与恢复 |
@@ -53,7 +55,7 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 
 ## 当前实现与下一步
 
-`infra/pi-durable-validation/` 是后续实现的基础，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`server/` 仍是旧 Pi SDK 验证代码，尚未迁移；本次调整的是设计与实施方向。
+`infra/pi-durable-validation/` 是后续实现的基础，已验证主/侧会话、后台执行、显式记忆、结果回传、一次跟进与进程恢复。Steel 侧只在**旧 Steel 基线**上验证过 REST/CDP、接管互斥与恢复；发布镜像上的完整交互与原生 RTC 接管**待重跑、尚未完成**（见[验证状态](verification-status.md)）。`apps/server/` 已建立 WP1a 基础骨架，实际验收见验证状态；完整产品链路仍待 WP1b 迁移。`server/` 仍是只读的旧 Pi SDK 验证代码。
 
 **当前优先级（2026-10-19 调整）**：先把 Agent 层坐稳——正式 Server 骨架、状态与事件契约、API v1、任务/上下文/记忆/投递的行为契约、常驻与长跑；**浏览器原生 RTC 集成暂缓**，只做止血与资源抽象。推进方式改为工作包（WP）+ 闸门，不按时间排期，人类定判断、agent 负责实现，见[实施路线](roadmap.md)与[AGENTS.md](../../AGENTS.md)。客户端流协议采用 [AG-UI 1.0](protocol-agui.md) 作为边缘投影，内部事件模型不变。必须遵守的约束见[Agent 层架构基调](agent-core.md)。
 
@@ -66,4 +68,4 @@ Point 是参考 Muse 形态的、持续运行的 personal agent：长期主会�
 - [本次调整前的 SDK 设计快照](archive/2026-10-18-before-pi-durable-steel/README.md)。
 - [2026-10-16 切换 SDK 前的设计快照](archive/2026-10-16-before-pi-sdk/README.md)：其中未经本轮复核的旧断言不自动恢复。
 - `docs/research/` 与 `.research/` 保留调研时点的结论，现行选型以本目录为准。
-- OpenSpec 当前没有正式 specs 或 changes；未来变更沿用本次架构决定。
+- OpenSpec 的 `point-long-term-foundation` 记录本次 WP1a；未归档前以该 change 的规格与任务为准。

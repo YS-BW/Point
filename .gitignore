@@ -38,3 +38,10 @@ backups/
 *.tmp
 *.bak
 *.log
+
+# Formal server build
+apps/server/dist/
+
+# Runtime implementation is source, not generated runtime data.
+!apps/server/src/runtime/
+!apps/server/src/runtime/**

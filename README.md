@@ -2,7 +2,7 @@
 
 一个人的、持续运行的 personal agent。参考 Muse 的产品形态：长期主会话、可持续的主题侧聊、独立后台执行、共享记忆、可观看与接管的浏览器、可交付的产物。**只服务一个人**，不建设多用户、租户、团队或角色系统。
 
-> **当前状态：可运行原型阶段，尚未产品化。** 执行与恢复、会话与任务链路、浏览器接管互斥已有进程级验收；正式 Server、Web 客户端、Steel 原生 RTC 控制权、鉴权与常驻部署仍待实现。判断依据见[项目现状分析](docs/project-status-2026-10-19.md)，证据数字见[验证状态](docs/design/verification-status.md)。
+> **当前状态：可运行原型阶段，尚未产品化。** 执行与恢复、会话与任务链路、浏览器接管互斥已有进程级验收；正式 Server 已建立 WP1a 基础骨架，产品能力迁移、Web 客户端、Steel 原生 RTC 控制权、鉴权与常驻部署仍待实现。判断依据见[项目现状分析](docs/project-status-2026-10-19.md)，证据数字见[验证状态](docs/design/verification-status.md)。
 
 ## 架构
 
@@ -28,14 +28,29 @@ flowchart TD
 
 | 路径 | 内容 |
 |---|---|
+| [`apps/server/`](apps/server/README.md) | 正式 Server 基础骨架；产品链路待 WP1b 迁移 |
 | [`infra/pi-durable-validation/`](infra/pi-durable-validation/README.md) | **当前活跃实现**：可运行原型、CLI、故障注入、真实 Steel/WebRTC 验收 |
 | [`infra/pi-durable-validation/evidence/`](infra/pi-durable-validation/evidence/README.md) | 已入库的验收证据（JSON + SHA-256 清单 + 复现命令） |
-| [`docs/design/`](docs/design/README.md) | 现行设计与实施顺序（11 篇） |
+| [`docs/design/`](docs/design/README.md) | 现行设计与实施顺序 |
 | [`docs/design/verification-status.md`](docs/design/verification-status.md) | **验证数字与时点的唯一口径** |
 | [`docs/research/`](docs/research) | 调研时点结论（保留历史，不代表现行选型） |
 | [`server/`](server/README.md) | 旧 Pi coding-agent SDK 验证工程（历史参考，不参与运行） |
 | [`infra/agent-browser/`](infra/agent-browser/README.md) · [`infra/dsh-validation/`](infra/dsh-validation/README.md) | 已退役的浏览器与 DSH 候选验证（保留否决理由与实测数据） |
-| [`openspec/`](openspec/config.yaml) | 已配置、尚未启用 |
+| [`openspec/`](openspec/config.yaml) | 本次 WP1a 规格与实施记录 |
+
+## 正式 Server 骨架
+
+架构入口：[长期 Server 架构](docs/design/server-architecture.md) · [实施路线](docs/design/roadmap.md) · [NanoMuse 架构分析](docs/research/nanomuse-architecture-2026-10-19.md)。
+
+```bash
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run build
+npm start
+```
+
+默认 `127.0.0.1:4310`，仅提供基础健康接口，尚无聊天/任务/模型执行功能。详情见 [Server README](apps/server/README.md)。以下原型入口仍用于体验既有产品能力。
 
 ## 快速开始
 

@@ -15,12 +15,12 @@
 产品任务（用户看到的"这件事"）与运行任务（Agent 执行的一次尝试）是两个身份，用稳定 ID 关联，不合并。
 
 - 现状：符合。产品 `job` 在 State 文档里，执行是 Durable task；`jobId` 与 task/conversation ID 互相引用。
-- 检查：任何"重跑/修订/取消"都不得复用执行 ID；`revision` 必须参与提交校验。
+- 检查：恢复同一次尝试沿用 attemptId；重跑或新修订创建新的 attemptId，取消不创建尝试。`revision` 必须参与提交校验。旧原型对这组身份的完整对应仍需 WP1b 审计。
 
 ### 3. 副作用三态：done / unknown / failed
 凡是离开进程的动作（发消息、提交表单、写外部系统、调用付费模型、通知渠道）都必须先记录意图，再执行，结果落盘。**中断后的 `unknown` 只能通过观察核销，禁止自动重放。**
 
-- 现状：符合且是原型最有价值的部分。投递 intent-before-effect（`service.mjs:419-462`）、浏览器动作 `unknown/reconcile`（`browser.mjs:143-171`）、`stale snapshot` 拒绝。
+- 现状：投递与浏览器已有实验覆盖，但付费模型、任意外部工具并未因此全部得到保证，仍需 WP7 审计。投递 intent-before-effect（`service.mjs:419-462`）、浏览器动作 `unknown/reconcile`（`browser.mjs:143-171`）、`stale snapshot` 拒绝。
 - 检查：新增任何外部调用，必须有 `attempting → acked | unknown` 记录与对应测试；不得直接 `await fetch(...)` 后就当作成功。
 
 ### 4. 幂等键 + 明确事务边界
@@ -82,28 +82,18 @@ Agent 层依赖锁定精确版本（当前 pi-durable / pi-ai / chord `1.3.0`）
 
 ```mermaid
 flowchart LR
-    subgraph Agent Core
-      D[domain: chats/tasks/memory/delivery]
-      R[runtime: harness/bootstrap/extensions]
-      S[storage: documents/migration/backup]
-    end
-    subgraph Adapters
-      BR[browser: lease/actions/unknown]
-      ST[steel: REST/CDP]
-      DL[delivery: sink/notify]
-      FS[files: workspace/artifacts]
-    end
-    API[api: /v1 HTTP + SSE] --> D
-    API --> R
-    D --> R
-    D --> S
-    D -->|resource 接口| BR
-    BR --> ST
-    D -->|delivery 接口| DL
-    D -->|file 接口| FS
+    API[api] --> A[application]
+    A --> D[domain and ports]
+    R[runtime] --> A
+    R --> S[storage]
+    R --> AD[adapters]
+    S --> D
+    AD --> D
+    Root[composition root] --> API
+    Root --> R
 ```
 
-**允许的依赖方向**：`api → domain → ports ← adapters`；`runtime` 只被 `api` 与组合根使用；`domain` 不 import `adapters` 的具体实现。
+**允许依赖**：api → application/domain；application → domain；runtime → application/domain/storage/adapters；storage/adapters → application/domain；组合根组装具体实现。domain 与 application 不依赖平台/SDK，domain 不定义 Durable task。AG-UI 只在 api。实际约束由根目录 `npm run check` 检查。长期职责见 [Server 架构](server-architecture.md)。
 
 ## 四、验收清单：什么算"Agent 层坐稳了"
 
@@ -117,4 +107,4 @@ flowchart LR
 - [ ] 7 天挂机无泄漏、无陈旧通知，成本可查。
 - [ ] 依赖升级流程演练过一次（锁版本 → 回归 → 迁移检查）。
 
-满足后，浏览器接原生 RTC 只是"再实现一个 adapter"，不会反过来改 Agent 层。
+满足后可在稳定资源边界内实施浏览器接入；具体适配仍需控制权、恢复与绕过路径验收，不能保证无需任何契约演进。

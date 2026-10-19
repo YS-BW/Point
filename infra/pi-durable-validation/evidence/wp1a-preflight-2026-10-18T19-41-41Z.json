@@ -1,0 +1,23 @@
+{
+  "at": "2026-10-18T19:41:43.955227+00:00",
+  "scope": "Read-only SDK schema admission and stricter module boundary regressions",
+  "results": [
+    {
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 0,
+      "output": "\n> point@0.0.0 check\n> tsc -p apps/server/tsconfig.json --noEmit && node scripts/check-boundaries.mjs\n\nArchitecture boundaries passed\n"
+    },
+    {
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exitCode": 0,
+      "output": "\n> point@0.0.0 test\n> npm run build && node --test apps/server/dist/test/*.test.js scripts/*.test.mjs\n\n\n> point@0.0.0 build\n> tsc -p apps/server/tsconfig.json\n\nTAP version 13\n# (node:47834) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n# (Use `node --trace-warnings ...` to show where the warning was created)\n# Subtest: configuration rejects external host, invalid port and blank directory\nok 1 - configuration rejects external host, invalid port and blank directory\n  ---\n  duration_ms: 0.49475\n  type: 'test'\n  ...\n# Subtest: runtime preserves identity and excludes a second owner; close is idempotent\nok 2 - runtime preserves identity and excludes a second owner; close is idempotent\n  ---\n  duration_ms: 11.727125\n  type: 'test'\n  ...\n# Subtest: unrecognized populated storage is refused and owner released\nok 3 - unrecognized populated storage is refused and owner released\n  ---\n  duration_ms: 6.004625\n  type: 'test'\n  ...\n# Subtest: unsupported metadata is not rewritten on failed startup\nok 4 - unsupported metadata is not rewritten on failed startup\n  ---\n  duration_ms: 7.125958\n  type: 'test'\n  ...\n# Subtest: health is truthful and unsupported routes and methods are rejected\nok 5 - health is truthful and unsupported routes and methods are rejected\n  ---\n  duration_ms: 15.332959\n  type: 'test'\n  ...\n# Subtest: failed HTTP bind releases storage ownership\nok 6 - failed HTTP bind releases storage ownership\n  ---\n  duration_ms: 9.712667\n  type: 'test'\n  ...\n# Subtest: SIGKILL releases directory ownership and restart preserves identity\nok 7 - SIGKILL releases directory ownership and restart preserves identity\n  ---\n  duration_ms: 103.958833\n  type: 'test'\n  ...\n# Subtest: foreign session-only documents are not adopted\nok 8 - foreign session-only documents are not adopted\n  ---\n  duration_ms: 3.637042\n  type: 'test'\n  ...\n# Subtest: interrupted initialization cannot leave a root without metadata\nok 9 - interrupted initialization cannot leave a root without metadata\n  ---\n  duration_ms: 102.608209\n  type: 'test'\n  ...\n# Subtest: entrypoint handles SIGTERM and logs no supplied config value\nok 10 - entrypoint handles SIGTERM and logs no supplied config value\n  ---\n  duration_ms: 212.875541\n  type: 'test'\n  ...\n# Subtest: unknown database is rejected before SDK writes to it\nok 11 - unknown database is rejected before SDK writes to it\n  ---\n  duration_ms: 4.153584\n  type: 'test'\n  ...\n# Subtest: older and newer SDK schemas require explicit migration before writable open\nok 12 - older and newer SDK schemas require explicit migration before writable open\n  ---\n  duration_ms: 2.632041\n  type: 'test'\n  ...\n# Subtest: boundary rejects static imports, reexports and import types across layers\nok 13 - boundary rejects static imports, reexports and import types across layers\n  ---\n  duration_ms: 2.784542\n  type: 'test'\n  ...\n# Subtest: boundary rejects dynamic and nonliteral imports\nok 14 - boundary rejects dynamic and nonliteral imports\n  ---\n  duration_ms: 0.692291\n  type: 'test'\n  ...\n# Subtest: boundary permits inward imports and SDK only at implementation edge\nok 15 - boundary permits inward imports and SDK only at implementation edge\n  ---\n  duration_ms: 0.682709\n  type: 'test'\n  ...\n# Subtest: new folders and absolute imports cannot silently bypass layering\nok 16 - new folders and absolute imports cannot silently bypass layering\n  ---\n  duration_ms: 0.117208\n  type: 'test'\n  ...\n1..16\n# tests 16\n# suites 0\n# pass 16\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 662.469042\n"
+    }
+  ]
+}

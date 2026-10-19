@@ -1,0 +1,22 @@
+{
+  "name": "point",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/server"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "node scripts/clean-build.mjs && tsc -p apps/server/tsconfig.json",
+    "check": "tsc -p apps/server/tsconfig.json --noEmit && node scripts/check-boundaries.mjs",
+    "test": "npm run build && node --test apps/server/dist/test/*.test.js scripts/*.test.mjs",
+    "start": "node apps/server/dist/src/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3"
+  }
+}
