@@ -257,3 +257,53 @@
 **G2 判据更新（2026-10-19 用户决定）**：G2 由“REST/AG-UI 契约测试通过 + CLI 切到新协议”改为“REST 与 AG-UI 契约测试通过，并由官方 `@ag-ui/client` 在契约测试中消费”；**不再提供产品 CLI 或参考 CLI**，首个真实客户端是 WP13 的 Web 客户端。
 
 **未验证项（不得外推）**：真实 provider 逐 token/网络断线重连/限流与背压（仅 faux）；真实 120s 空闲触发 `OBSERVATION_TIMEOUT`（映射与“不取消执行”已由既有重试测试与超限回归覆盖）；快照上限只验证 10,001 条一条路径，8 MiB/1,000 页边界未逐一触发；前台 chat run 仍无工具事件（工具历史属 WP6）；`/v1/agent` 同幂等键重放语义与流式访问日志脱敏未单独复测；Web 客户端（WP13）尚未存在。
+
+## WP6 读模型、增量事件与线程流（2026-10-19）
+
+**范围**：`GET /v1/state` 派生读模型、`/inspect` Durable 计数、`subscribeCommits` 增量投影（`STATE_DELTA`/`ACTIVITY`/`CUSTOM`）、线程流 `GET /v1/threads/:threadId/stream`（帧级游标 + `Last-Event-ID` 重连 + 显式重同步）、运行流 `GET /v1/runs/:runId/stream`（只观察）。
+
+| 证据项 | 数值 / 结果 | 时点 (UTC) | 证据 |
+|---|---|---|---|
+| 根目录全量 | `npm run check`、`npm test` 通过：**352 项通过，0 fail / 0 skip / 0 cancelled** | 2026-10-19T14:50:22Z | `evidence/wp6-final-2026-10-19T14-50-22Z.json` |
+| 本片新增 | `read-model` 5 + `commit-stream` 4 + `thread-stream` 6 + `stream-recovery` 12 = **27 项** | 同上 | 同上 |
+| 读模型硬判据 | 真实 `startServer` + 真实 SQLite，包装 `SqliteStorage.prototype.task` 与 `scanTasks`：`GET /v1/state` 期间两者调用数均为 **0** | 同上 | `read-model.test.ts` |
+| 增量判据 | 单 chat commit → 1 个 `STATE_DELTA`、1 条 patch path、帧数常数；连续 3 commit 帧序非递减；degraded family 退化为 `bounded_view` 快照且无 delta | 同上 | `commit-stream.test.ts` |
+| 线程流判据 | 原始 HTTP + 自写 SSE 解析器：sync run 首帧合法、帧 id 唯一且形如 `<seq>:<n>`、窗口内重连只补后续帧、未知 cursor 显式 resync、双连接各收 1 份、未知 thread 走 REST 404 | 同上 | `thread-stream.test.ts` |
+| **恢复与资源释放判据**（针对独立复查指出的四个缺口） | resync 期间完成的任务不会回退；慢快照的补发窗口被裁剪时显式失败；连接名额在异步建立前预占、建立失败即释放；取消/投影失败释放 SDK 监听器且重试不累积；线程流与运行流共享准入；运行流改为消费原生 publication（无 250ms 轮询）、空闲超时以 `OBSERVATION_TIMEOUT` 结束而非谎报失败 | 同上 | `stream-recovery.test.ts` |
+| 原型回归 | `npm run check`（28 模块）+ `POINT_CRASH_ROUNDS=1 npm test` **28/28** | 同上 | 本段命令输出 |
+| 独立动态验证 | tester 编写、Lead 执行：**20/20 通过**（E1/E2/E3 全部达成） | 同上 | `apps/server/test/verify/**` |
+| 独立审计 | code-reviewer：**blocker 清零**（累计关闭 9 个），四条复查缺口闭合；产品审核：**带条件符合**（P1–P20 中 18 符合 / 2 部分符合）。两者均**不含** tester 动态验证 | 同上 | `docs/team/reviews/wp6-code-audit.md`、`wp6-product-conformance.md` |
+| OpenSpec strict | `agent-read-model` valid 且 **24/24 tasks complete** | 同上 | `openspec validate --strict`、`openspec list` |
+
+### 独立动态验证结果（tester 编写、Lead 执行；2026-10-19）
+
+`apps/server/test/verify/**`（tester 独立编写，**20 项**）最终 **20/20 通过**，耗时约 13 秒。
+
+| 判据 | 结果 | 证据 |
+|---|---|---|
+| **E1** 100 job / 10 chat 下 `GET /v1/state` 不读 Durable task 表 | **通过**：`storage.task` 与 `scanTasks` 调用数均为 0 | `verify/state-read-model.test.ts` |
+| **E2** 单 commit 只发 O(变更) 帧 | **通过**：单 job amend = 1 条 patch 操作，帧数与 patch 大小不随总 job 数增长，delta 远小于全量快照 | `verify/commit-delta.test.ts` |
+| **E3** 离线重连后状态/消息一致 | **通过**：窗口内只补后续帧且 state+messages 收敛；帧级续传（断在 commit 中间）；`window_exceeded`/`unknown_seq`/`process_restarted` 三种重同步均不伪造连续 | `verify/reconnect.test.ts` |
+| 其他 | 通过：索引随生命周期更新、chats 上限 1000 与 `truncated`、鉴权/信封/免幂等键、memory 不含正文、`/inspect` 冻结计数、SSE 解析器健壮性、RFC 6902 应用器与幂等语义 | 同上各文件 |
+
+**首轮为 14 pass / 5 fail / 1 cancelled，失败全部为真实缺陷，已修复并复跑全绿。** 修复项：
+
+1. **派生 v2 索引更新被静默丢弃（根因，最严重）**：`tx.doc(family, key, seed)` 对**已存在**的文档会忽略 seed 并返回当前值，调用方丢弃返回值就等于什么都没写。因此 `point.chats`/`point.jobs`/`point.resources`/`point.requests` 停留在创建时的值 → `/v1/state` 与所有 `STATE_DELTA` 对更新过的实体是陈旧的（实测：实体 `failed`、索引仍 `queued`）。修法：`Object.assign(await tx.doc(...), entry)`（`runtime/state-index.ts`）。
+2. 窗口内重连会新开同步 run + 快照，违反冻结的绑定契约 → 改为只补游标之后的帧。
+3. 回退保护把"客户端断在 commit 中间时的剩余帧"一并丢弃 → 改为只丢弃**严格早于**已发快照 seq 的帧。
+4. 补发时过滤掉了 `MESSAGES_SNAPSHOT`，重连后历史停在旧值 → 仅对"已收到新快照的连接"跳过更旧的历史快照。
+
+**测试成本调整（断言未放宽）**：保留窗口溢出用例改为注入 32 帧窗口，不再串行发 6,000 次真实请求；另一处把"按数组计行"改为按冻结的 id 为键形状计数。
+
+**完成边界与未验证项（不得外推）**：
+
+- 读模型与增量帧是**派生视图**，删除可重建；产品决定不得依赖它们。
+- `/v1/state` **响应有界但成本不是常量**：`point.event`/`point.chats`/`point.jobs`/`point.resources`/`point.memory` 在 storage 查询里无排序，取最新 N 条需全扫，成本 O(总文档数)。`/inspect` 同理。未压测大库耗时。
+- `events` 族**只随快照更新、不参与 delta**（否则每次提交都会因截断退化，打掉 O(变更) 判据）。
+- SDK **无 commit 历史枚举**，因此断线期间的事件无法补发：线程流靠有界 ring（4096 帧 / 5 分钟）补发，窗口外只做显式重同步（`window_exceeded`/`unknown_seq`/`process_restarted`）；运行流**不补发**离线事件，只从当前状态继续观察。**不承诺"断多久都能续"**。
+- 线程流 **不发逐 token 文本/工具事件**（那些只走 `POST /v1/agent`）；`MESSAGES_SNAPSHOT` 仍只有可见文本，`metadata.point.toolsIncluded=false`，**完整工具历史快照显式 deferred**。
+- 运行流只投影**任务状态与阶段**（`ACTIVITY_SNAPSHOT`），不投影工具调用/文本；失败走 `RUN_ERROR`，取消走 `outcome.cancelled`。
+- **线程流 ring 用 `Array.shift()` 出队（O(n)）**：稳态下每帧搬运动 4096 个元素，功能正确、当前量级可接受；高频压测前建议改成 head-index 环形缓冲（已记 deferred，不在 WP6 范围）。
+- `/v1/state` 在**持续高频写入**下可能以 503 `OBSERVATION_RESYNC_REQUIRED` 结束（整轮重试耗尽），未测其在高写入负载下的实际失败率与客户端重试行为。
+- 未验证：真实 SSE 长连接/反向代理缓冲/半开连接/EPIPE、慢消费者与 64 并发上限压测、跨进程/多实例、进程重启后的重同步端到端、真实 provider 下的增量时序、`/v1/state` 大库（10k+ 文档）耗时与内存、tester 的 100 job/10 chat 独立夹具结论。
+- 本片**不**补 `state-v2.md:77` 的 attempt/delivery/operation 完整事件时间线重建（仍为悬空承诺，需单列 WP）。

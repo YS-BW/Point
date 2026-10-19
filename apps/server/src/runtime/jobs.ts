@@ -70,9 +70,13 @@ async function recordJob(
 ): Promise<void> {
   await writeJobIndex(tx, job);
   if (type !== undefined) {
+    // The attempt identity is recorded with the event so a later projection can attribute the frame
+    // without reading mutable current state (which may have moved on by the time the frame is built).
+    const identity = job.currentAttemptId === null ? {} : {attemptId: job.currentAttemptId};
+    const merged = {...identity, ...(data ?? {})};
     await appendEvent(tx, {
       type, aggregate: 'job', aggregateId: job.id, revision: job.revision, at: job.updatedAt,
-      ...(data === undefined ? {} : {data}),
+      ...(Object.keys(merged).length === 0 ? {} : {data: merged}),
     });
   }
 }

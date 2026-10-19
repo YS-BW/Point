@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-10-19T07:50:28.464825+00:00",
-  "note": "验收证据副本；仅将绝对家目录前缀归一化为 <home>，其余字段逐字保留。原始文件仍在 runtime/（已归档至 ~/.point-archive/）。",
+  "note": "\u9a8c\u6536\u8bc1\u636e\u526f\u672c\uff1b\u4ec5\u5c06\u7edd\u5bf9\u5bb6\u76ee\u5f55\u524d\u7f00\u5f52\u4e00\u5316\u4e3a <home>\uff0c\u5176\u4f59\u5b57\u6bb5\u9010\u5b57\u4fdd\u7559\u3002\u539f\u59cb\u6587\u4ef6\u4ecd\u5728 runtime/\uff08\u5df2\u5f52\u6863\u81f3 ~/.point-archive/\uff09\u3002",
   "files": [
     {
       "file": "offline-execution-2026-10-18T16-55Z.json",
@@ -189,6 +189,27 @@
       "bytes": 201583,
       "sha256": "bdd362512effadf8c9538316b6499f31911cc838d33e5087107734d80543b71c",
       "source": "WP5 SDK correction final commands, shared HTTP regression and prior failed verification",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp6-read-model-2026-10-19T11-33-06Z.json",
+      "bytes": 786,
+      "sha256": "ef10125e65736b0773774624ccb8e8f03a14993e90c1b3d65651e91c31b1cbdc",
+      "source": "WP6 read model, incremental frames, thread stream and run stream final commands",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp6-read-model-2026-10-19T12-15-22Z.json",
+      "bytes": 2152,
+      "sha256": "ddff9e950ce5aeeb8d956584c575f0532833292dd1c575968c099e974d80283f",
+      "source": "WP6 final gate plus recovery/resource-release follow-up commands",
+      "normalized": "absolute home prefix -> <home>"
+    },
+    {
+      "file": "wp6-final-2026-10-19T14-50-22Z.json",
+      "bytes": 2776,
+      "sha256": "b322707709bfe0f3f55a7deb7416efc46411d8c09525c344c14461193d64294f",
+      "source": "WP6 final gate: main suite + tester-authored independent dynamic verification",
       "normalized": "absolute home prefix -> <home>"
     }
   ]

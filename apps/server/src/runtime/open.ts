@@ -36,6 +36,14 @@ import {
   cleanupReceipts, rebuildEventTimeline,
   type EventRebuildResult, type ReceiptCleanupOptions, type ReceiptCleanupResult,
 } from './maintenance.js';
+import { streamBudget } from './stream-budget.js';
+import { readModelRuntime } from './read-model.js';
+import { commitStreamRuntime } from './commit-stream.js';
+import { threadStreamRuntime } from './thread-stream.js';
+import { runStreamRuntime } from './run-stream.js';
+import type { CommitStreamPort, ReadModelPort } from '../application/read-model.js';
+import type { ThreadStreamPort } from '../application/thread-stream.js';
+import type { RunStreamPort } from '../application/run-stream.js';
 
 export type ModelBinding = {models: Models; model: ModelRef};
 
@@ -60,6 +68,8 @@ export type OpenRuntimeOptions = {
    * beginOperation whose kind is not registered is rejected with EFFECT_NOT_REGISTERED.
    */
   resources?: ResourceRuntimeOptions;
+  /** Stream retention overrides; production defaults are frozen in `thread-stream.ts`. */
+  streams?: Readonly<{retentionFrames?: number; retentionMs?: number}>;
 };
 export type Runtime = RuntimeHandle & {
   readonly chats: ChatCommands;
@@ -71,6 +81,14 @@ export type Runtime = RuntimeHandle & {
   readonly resources: ResourceCommands;
   /** WP5: provider-neutral foreground run stream consumed by the AG-UI edge. */
   readonly agent: AgentRunPort;
+  /** WP6: derived read model (`/v1/state`) and the Durable counts behind `/inspect`. */
+  readonly readModel: ReadModelPort;
+  /** WP6: incremental frames derived from committed Durable documents. */
+  readonly commitStream: CommitStreamPort;
+  /** WP6: per-thread SSE subscription with frame-cursor reconnect. */
+  readonly threadStream: ThreadStreamPort;
+  /** WP6: read-only observation of one background execution. */
+  readonly runStream: RunStreamPort;
   /** True when the runtime was opened with `mode: 'read-only'`. */
   readonly readOnly: boolean;
   /** Explicit bounded request-ledger cleanup; never removes active/attempting/unknown references. */
@@ -167,6 +185,8 @@ export async function openRuntime(
       token: options?.resources?.token ?? randomUUID,
       deadlineMs: options?.resources?.deadlineMs ?? 30_000,
     });
+    const readModel = readModelRuntime({getHarness: current, scan});
+    const commitStream = commitStreamRuntime({getHarness: current, readModel});
     const artifacts = artifactCommandsForHarness(current(), dataDir);
     const jobTools = jobToolsExtension(workspace);
     const saveArtifact = saveArtifactTool(workspace);
@@ -196,6 +216,7 @@ export async function openRuntime(
     registry.install(schedules.extension);
     // Only an explicitly configured, read-write host resumes execution.
     if (binding && mode === 'read-write') harness.resume();
+    const observationBudget = streamBudget();
     let closing: Promise<void> | undefined;
     return {instanceId, chats: chatCommands(durableChatStore(current())),
       conversation: conversation.commands, profile: profileCommands(durableProfileStore(current, scan)),
@@ -204,6 +225,12 @@ export async function openRuntime(
       deliveries: deliveries.commands,
       resources,
       agent: agentRuntime(conversation.commands, current),
+      readModel,
+      commitStream,
+      threadStream: threadStreamRuntime({readModel, commitStream, conversation: conversation.commands, budget: observationBudget,
+        ...(options?.streams?.retentionFrames === undefined ? {} : {retentionFrames: options.streams.retentionFrames}),
+        ...(options?.streams?.retentionMs === undefined ? {} : {retentionMs: options.streams.retentionMs})}),
+      runStream: runStreamRuntime({getHarness: current, budget: observationBudget}),
       readOnly: mode === 'read-only',
       cleanupReceipts: options => mode === 'read-only'
         ? Promise.reject(new StateFormatError('READ_ONLY'))

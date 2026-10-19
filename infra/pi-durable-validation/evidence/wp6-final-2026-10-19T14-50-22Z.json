@@ -1,0 +1,49 @@
+{
+  "at": "2026-10-19T14-50-22Z",
+  "scope": "WP6 final: read model, incremental frames, thread stream with frame-cursor reconnect, run stream",
+  "commands": [
+    {
+      "cmd": "npm run check",
+      "result": "pass (tsc + architecture boundaries)"
+    },
+    {
+      "cmd": "npm test",
+      "result": "352/352 pass, 0 fail, 0 skip, 0 cancelled"
+    },
+    {
+      "cmd": "node --test apps/server/dist/test/verify/*.test.js",
+      "result": "20/20 pass (tester-authored independent dynamic verification)"
+    },
+    {
+      "cmd": "cd infra/pi-durable-validation && POINT_CRASH_ROUNDS=1 npm test",
+      "result": "28/28 pass"
+    },
+    {
+      "cmd": "openspec validate agent-read-model --strict",
+      "result": "valid"
+    }
+  ],
+  "roadmapExitCriteria": {
+    "E1_state_no_task_reads": "pass — 100 jobs / 10 chats fixture: GET /v1/state performs 0 storage.task and 0 scanTasks calls",
+    "E2_single_commit_O_change": "pass — one-job amend = 1 patch op, frame count independent of total job count, delta << full snapshot",
+    "E3_reconnect_consistency": "pass — in-window replay converges state+messages; frame-granular resume; window_exceeded/unknown_seq/process_restarted resync with no faked continuity"
+  },
+  "defectsFoundAndFixedByVerification": [
+    "derived v2 index updates were silently dropped: tx.doc(family,key,seed) ignores the seed for an existing document, so point.chats/point.jobs/point.resources/point.requests stayed at their creation value (stale /v1/state and stale STATE_DELTA). Fixed by mutating the returned draft in runtime/state-index.ts.",
+    "in-window reconnect opened a new sync run/snapshot, violating the frozen binding contract; now replays only the frames after the cursor",
+    "rollback guard discarded the remaining frames of the commit a client was cut inside; guard now only drops frames strictly older than the last snapshot actually sent",
+    "messages snapshots were filtered out of in-window replay, so reconnected clients kept stale history"
+  ],
+  "testCostChanges": [
+    "retention overflow test now injects a 32-frame window instead of issuing 6,000 real commits (assertions unchanged)",
+    "one assertion counted rows with array semantics; updated to the frozen id-keyed shape via the shared familyArray helper"
+  ],
+  "unverified": [
+    "real SSE long connections / reverse proxy buffering / half-open / EPIPE",
+    "slow consumer behaviour and the 64 concurrent stream cap under load",
+    "process restart resync end-to-end over HTTP beyond the in-suite restart case",
+    "large-library /v1/state and /inspect cost (O(total documents), unmeasured)",
+    "full tool-history messages snapshot (deferred to a later WP)",
+    "attempt/delivery/resource-operation event timeline rebuild (deferred)"
+  ]
+}

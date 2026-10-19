@@ -5,7 +5,7 @@
 
 ## 当前交付与长期方向
 
-**2026-10-19 最新决定**：正式 Server 已推进至 WP5，官方 SDK 兼容性纠偏已通过自动化验收，下一片为 WP6。用户指出原型在稳定性和扩展性上不足，要求 WP1b 从工程角度重建；此前“直接迁移、保留全部实现行为”的执行方式被本决定取代。
+**2026-10-19 最新决定**：正式 Server 已推进至 **WP6 并交付**（读模型、增量事件、线程流与断线恢复；独立动态验证 20/20），G3 依据见[验证状态](verification-status.md)；下一片是 WP7（行为加固）与 WP9（长期运行）。用户指出原型在稳定性和扩展性上不足，要求 WP1b 从工程角度重建；此前“直接迁移、保留全部实现行为”的执行方式被本决定取代。
 
 WP1b 以产品行为契约和失败语义为出口，原型只提供案例与可行性证据。旧离线套件继续作为原型回归，不要求机械复制测试数量，也不把原型偶然行为当作产品要求。正式实现独立测试，每片同时验证持久化、幂等与恢复。实际完成状态见 [验证状态](verification-status.md)，执行明细见 [核心重建计划](agent-core-rebuild.md)。
 
@@ -42,7 +42,7 @@ WP1b 以产品行为契约和失败语义为出口，原型只提供案例与可
 | **WP3** | 状态 v2 + 迁移：`point.meta/chats/chat/memory/job/jobs/browser/requests` 分片；事件改时间线；单 commit 迁移；升级前自动备份；版本闸门 | WP1（与 WP4 可并行，但**事务组唯一 owner**） | v1 夹具库升级语义等值；重启两次迁移幂等；恢复 pre-v2 快照可启动；请求账本有清扫 | `apps/server/src/storage/**`、`runtime/**` |
 | **WP4** | API v1 基础契约：`/v1`、错误码对象、所有写操作幂等键、`/inspect` 门控、鉴权、访问日志 | WP1 | 契约测试覆盖 400/404/409/413/503；重放响应逐字节相等 | `apps/server/src/api/**` |
 | **WP5** | AG-UI 投影：`POST /v1/agent`、run 生命周期、文本/工具/step 事件、官方 schema 校验与编码、有界 `MESSAGES_SNAPSHOT`、cancelled 语义（标准 `usage` 因无法归属单次运行而省略） | WP4 | 契约测试：流以 `RUN_STARTED` 开头；未知事件被容忍；截断流不伪造 FINISHED；官方 `@ag-ui/client` 在契约测试中消费该流 | `apps/server/src/api/agui/**` |
-| **WP6** | 读模型 + 增量事件：`subscribeCommits` 投影；`STATE_SNAPSHOT/DELTA`、`MESSAGES_SNAPSHOT`、`ACTIVITY`、`CUSTOM`；线程流（自定义绑定 + `Last-Event-ID` + 同步 run）；运行流 | WP3、WP4、WP5 | 100 job/10 chat 夹具下 `/state` 的 `storage.task` 调用=0；单 commit 只发 O(变更) 帧；离线重连后状态/消息一致 | `apps/server/src/api/**`、`storage/**` |
+| **WP6** | 读模型 + 增量事件：`subscribeCommits` 投影；`STATE_SNAPSHOT/DELTA`、`MESSAGES_SNAPSHOT`、`ACTIVITY`、`CUSTOM`；线程流（自定义绑定 + `Last-Event-ID` + 同步 run）；运行流 | WP3、WP4、WP5 | 100 job/10 chat 夹具下 `/state` 的 `storage.task` 调用=0；单 commit 只发 O(变更) 帧；离线重连后状态/消息一致 | `apps/server/src/api/**`、`application/**`（中性端口类型）、`runtime/**`、`storage/**` |
 | **WP7** | Agent 行为加固：任务状态转移表（含非法转移）、artifact/deliver 的 revision 复检、上下文/压缩边界、记忆上限与遗忘、投递 `unknown` 核销、成本记录 | WP1、WP2（部分依赖 WP3） | 状态转移表 100% 覆盖；每类副作用都有 `unknown` 用例；一次任务可从事件重建 | `apps/server/src/domain/**`、`adapters/**` |
 | **WP8** | 常驻化与运维：Dockerfile + compose（restart/healthcheck/资源限制/卷/TZ/非 root）、日志保留、定时备份、指标（任务数/失败率/延迟/费用） | WP1 | 容器重启状态与计划无损；恢复演练通过；一次任务全链路可追溯 | `apps/server/Dockerfile`、`deploy/**`、`infra/**` |
 | **WP9** | 长期运行：7 天挂机、供应商故障退避、周期计划最小版、判断层最小规则、成本预算与告警 | WP6、WP7、WP8 | 7 天无泄漏/无丢计划/无陈旧通知；人为注入超时与限流可恢复 | `apps/server/**`、`docs/design/**` |
@@ -73,7 +73,7 @@ flowchart LR
 
 | Lane | 工作包 | 拥有的文件 | 约束 |
 |---|---|---|---|
-| **A 状态与读模型** | WP3 → WP6 | `storage/**`、`api/**` 的事件投影部分 | **schema/事务组唯一 owner**，其他 lane 不得改 |
+| **A 状态与读模型** | WP3 → WP6 | `storage/**`、`runtime/**` 的读模型/提交订阅、`api/**` 的事件投影部分 | **schema/事务组唯一 owner**，其他 lane 不得改。WP6 新增 `application/read-model.ts` 只是中性类型，不含 SDK/AG-UI |
 | **B 接口与协议** | WP4 → WP5 | `api/http/**`、`api/agui/**` | 只读 A 的存储接口，不改 schema |
 | **C 领域行为** | WP2 → WP7 | `domain/**`、`application/**`、`adapters/**` | 依赖 B 的契约草案，不改 api |
 | **D 运维与止血** | WP8、WP10 | `Dockerfile`、`deploy/**`、`infra/**` | 不改应用逻辑 |

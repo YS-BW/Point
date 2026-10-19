@@ -20,9 +20,13 @@
 
 ## 3. 非目标
 
-AG-UI/SSE 与 `POST /v1/agent`（WP5）、读模型与增量事件（WP6）、多租户/OAuth/限流、批量或删除类端点、把 Durable 计数放进 `/inspect`（留 WP6）。
+AG-UI/SSE 与 `POST /v1/agent`（WP5）、读模型与增量事件（WP6 已交付）、多租户/OAuth/限流、批量或删除类端点。**WP6 已把 Durable 计数放进 `/inspect`**（键固定 13 个实体族，`countsTruncated` 当前恒为 false、计数为精确值）。
+
+**WP6 新增只读端点**：`GET /v1/state`（派生读模型，GET 不需要 Idempotency-Key）、`GET /v1/threads/:threadId/stream`（线程流，自定义 SSE 绑定，帧 `id` 为 `<commitSeq>:<frameIndex>` 帧级游标）、`GET /v1/runs/:runId/stream`（后台执行观察流，`runId` = Durable task id）。新增稳定错误码：`TOO_MANY_STREAMS`(503)、`RUN_NOT_FOUND`(404)、`OBSERVATION_TIMEOUT`(503)、`OBSERVATION_RESYNC_REQUIRED`(503)、`RUN_FAILED`（**仅作为 SSE `RUN_ERROR.code`**，不参与 HTTP 错误信封，故不在 `STATUS_BY_CODE` 注册）、`CHAT_NOT_FOUND`(404)。
 
 ## 4. 已知边界与未验证
+
+- **`GET /v1/state` 在持续写入时可能返回 503 `OBSERVATION_RESYNC_REQUIRED`**：读模型要求一次快照的多 family 扫描期间没有并发提交，否则整轮重扫（最多 4 轮）；仍不一致时显式失败，而不是返回一个混合了不同时间点的旧快照。这是刻意的正确性取舍，运维不应把它当成服务故障——客户端重试即可。
 
 - `/health` 的 404/405 错误体现在也走统一信封（相对旧裸 `{code}` 是形状变化）；Node `clientError` 级别错误可能没有信封。
 - 未验证：跨进程并发压测、HTTPS 终止/反向代理、限流与审计留存、真实模型或外部 adapter 组合下的端到端（HTTP 层不调用模型；未绑定 provider 时 `send` 映射 503）。
