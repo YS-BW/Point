@@ -109,3 +109,75 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 ```
 
 只有 `Job.status === 'ready'` 可计划；同一 `(jobId, revision)` 只能有一个 schedule（cancelled 可替换），重排需 amend 或先 cancel。判断记录 `point.decision`；会话投递在 source chat 追加一条 `point.report` assistant entry（不调用模型），外部通知经可注入 `NotificationPort`（本片仅有测试用 `memoryNotificationAdapter`，target 固定 `test`）。通知先记 intent 再调用，failed/unknown 不自动重放，且不改变 Job/chat。错过合并为一次判断/一次投递；取消不撤回已创建 delivery；报告不重新核对 artifact hash（以 `jobs.artifact()` verify 为准）。契约见 [计划与投递](../../docs/design/plan-and-delivery.md)。
+
+## HTTP API v1 契约（WP4）
+
+`/v1` 是既有 application commands 的薄传输层：不复制业务规则、不新增事实，成功响应就是命令返回的 JSON（对象/数组/文本字段），失败统一为错误信封。除 `/health/*` 与门控 `/inspect` 外一律要求 Bearer。
+
+### 环境变量与鉴权
+
+| 变量 | 语义 |
+|---|---|
+| `POINT_API_TOKEN` | `/v1` 的 Bearer token（1..512 字符，不允许空白/控制字符）。**未配置时 `/v1` 全部 503 `API_NOT_CONFIGURED`（fail-closed）**；`/health/*` 始终开放。 |
+| `POINT_API_INSPECT` | `1` 时启用只读 `GET /inspect`；缺省/`0` 时返回 404（不暴露存在性），且需要与 `/v1` 相同的 Bearer。 |
+
+鉴权比较使用常量时间；缺失/错误 Bearer 返回 401 `UNAUTHORIZED`，不执行任何命令。未知路径先判定 404、方法不符先判定 405，再进入鉴权。
+
+### 错误信封与状态码映射
+
+```json
+{"error":{"code":"INVALID_COMMAND","message":"invalid command","requestId":"..."}}
+```
+
+| HTTP | code（稳定，客户端不解析文案） |
+|---|---|
+| 400 | `INVALID_COMMAND`、`INVALID_TRANSITION`、`INVALID_EVIDENCE`、`PAYLOAD_REJECTED`、`RESULT_REJECTED`、`EFFECT_NOT_REGISTERED` |
+| 401 | `UNAUTHORIZED` |
+| 404 | `NOT_FOUND`、`CHAT_NOT_FOUND`、`JOB_NOT_FOUND`、`COMMAND_NOT_FOUND`、`SCHEDULE_NOT_FOUND`、`DELIVERY_NOT_FOUND`、`OPERATION_NOT_FOUND`、`ARTIFACT_NOT_FOUND` 等 `*_NOT_FOUND` |
+| 405 | `METHOD_NOT_ALLOWED`（带 `Allow` 头） |
+| 409 | `IDEMPOTENCY_CONFLICT`、`RESOURCE_CONFLICT`、`RESOURCE_BUSY`、`STALE_CONTROL`、`LEASE_EXPIRED`、`STALE_ATTEMPT`、`IN_PROGRESS`、`RECOVERY_REQUIRED`、`ARTIFACT_CONFLICT`、`REVISION_MISMATCH`、`JOB_TERMINAL` |
+| 413 | `PAYLOAD_TOO_LARGE` |
+| 503 | `API_NOT_CONFIGURED`、`RUNTIME_NOT_READY`、`MODEL_NOT_CONFIGURED`、`NOTIFICATION_NOT_CONFIGURED`、`DATA_DIR_BUSY` |
+| 500 | `INTERNAL_ERROR`（固定 message，不含栈/路径/凭据；未知异常一律归入） |
+
+### 幂等与请求约束
+
+- 所有写端点必须带 `Idempotency-Key`（`^[A-Za-z0-9._:-]{1,128}$`），HTTP 层把它映射为命令的 `requestId`；body 中出现 `requestId` 或路径参数同名键会被 400 拒绝（路由是唯一来源）。
+- 同 key 同 payload 的重放返回**逐字节相同**的成功响应：靠既有 Durable 收据，不缓存 HTTP 响应（不产生第二份事实）；同 key 异 payload → 409 `IDEMPOTENCY_CONFLICT`。
+- 请求体必须 `Content-Type: application/json`，严格 JSON object；上限 1 MiB，超过在读取时立即 413（不先全量缓冲）。空 body 的写端点按 `{}` 处理。
+- 每个响应带 `X-Request-Id`（可由请求头提供，非法则生成 UUID），错误信封内同样携带。
+- 访问日志每请求一行 JSON：`at/event/requestId/method/path/status/durationMs/bytesIn`；**绝不记录 Authorization、body 或查询串**。
+
+### 路由表
+
+| 方法 | 路径 | 命令 |
+|---|---|---|
+| POST | `/v1/chats` | `chats.create` |
+| GET | `/v1/chats/:chatId` | `chats.get` |
+| POST | `/v1/chats/:chatId/messages` | `conversation.send` |
+| POST | `/v1/chats/:chatId/stop` | `conversation.stop` |
+| POST | `/v1/chats/:chatId/compact` | `conversation.compact` |
+| GET | `/v1/chats/:chatId/history?limit=&cursor=` | `conversation.history` |
+| GET | `/v1/commands/:commandId` | `conversation.status` |
+| POST | `/v1/profile/remember` | `profile.remember` |
+| POST | `/v1/profile/forget` | `profile.forget` |
+| GET | `/v1/profile` | `profile.list` |
+| GET | `/v1/profile/export` | `profile.exportMarkdown`（`{markdown}`） |
+| POST | `/v1/jobs` | `jobs.start` |
+| GET | `/v1/jobs/:jobId` | `jobs.get` |
+| POST | `/v1/jobs/:jobId/amend` | `jobs.amend` |
+| POST | `/v1/jobs/:jobId/cancel` | `jobs.cancel` |
+| GET | `/v1/jobs/:jobId/attempts` | `jobs.attempts` |
+| GET | `/v1/artifacts/:artifactId` | `jobs.artifact`（artifactId 需 URL 编码） |
+| POST | `/v1/followups` | `followups.schedule` |
+| POST | `/v1/followups/:scheduleId/cancel` | `followups.cancel` |
+| GET | `/v1/followups/:scheduleId` | `followups.get` |
+| GET | `/v1/followups/:scheduleId/occurrences` | `followups.occurrences` |
+| GET | `/v1/followups/decisions?jobId=` | `followups.decisions` |
+| GET | `/v1/followups/deliveries?jobId=` | `followups.deliveries` |
+| GET | `/v1/deliveries/:deliveryId` | `deliveries.get` |
+| GET | `/inspect` | 门控诊断：`{version, instanceId, phase, capabilities}` |
+
+### 边界与未验证项
+
+成功响应不做外层包装、无分页游标之外的读模型；`/inspect` 只报 server 身份/阶段，**Durable 计数依赖尚未实现的读模型（WP6）**。不实现 AG-UI/SSE（WP5）、多租户/OAuth/限流、批量或删除类端点。`/v1` 与真实模型/外部端点组合的端到端行为取决于 `openRuntime` 绑定与注入的 adapters；HTTP 层本身不使用模型。未验证：跨进程并发压测、真实客户端重连（属 WP5/WP6）、HTTPS 终止与反向代理、限流与审计留存。

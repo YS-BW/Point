@@ -3,12 +3,26 @@ import type { Phase } from './domain/lifecycle.js';
 import type { RuntimeHandle } from './application/ports.js';
 import type { Config } from './config.js';
 import { readConfig } from './config.js';
-import { createHttp } from './api/http.js';
+import { createHttp, type ApiRuntime } from './api/http.js';
 import { openRuntime } from './runtime/open.js';
 
 export type ServerEnd = 'stopped' | 'failed';
 /** Composition dependency, also permits lifecycle fault testing without SDK internals. */
 export type RuntimeFactory = (dataDir: string) => Promise<RuntimeHandle>;
+
+/** The runtime exposes command ports only for a fully composed runtime; fake handles stay health-only. */
+function apiRuntime(runtime: RuntimeHandle): ApiRuntime | undefined {
+  const candidate = runtime as unknown as Partial<ApiRuntime>;
+  return candidate.chats !== undefined
+    && candidate.conversation !== undefined
+    && candidate.profile !== undefined
+    && candidate.jobs !== undefined
+    && candidate.followups !== undefined
+    && candidate.deliveries !== undefined
+    && typeof candidate.instanceId === 'string'
+    ? candidate as ApiRuntime
+    : undefined;
+}
 
 export async function startServer(config: Config, runtimeFactory: RuntimeFactory = openRuntime) {
   readConfig({POINT_HOST: config.host, POINT_PORT: String(config.port), POINT_DATA_DIR: config.dataDir});
@@ -16,7 +30,13 @@ export async function startServer(config: Config, runtimeFactory: RuntimeFactory
   const runtime = await runtimeFactory(config.dataDir);
   let runtimeEnded = false;
   void runtime.closed.then(() => { runtimeEnded = true; });
-  const server = createHttp({status: () => ({phase, capabilities: ['foundation']})});
+  const commands = apiRuntime(runtime);
+  const server = createHttp({
+    health: {status: () => ({phase, capabilities: ['foundation']})},
+    ...(commands === undefined ? {} : {commands}),
+    ...(config.apiToken === undefined ? {} : {apiToken: config.apiToken}),
+    inspect: config.apiInspect === true,
+  });
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
