@@ -2,9 +2,13 @@ import { defineDocFamily } from '@earendil-works/pi-durable';
 import type { Attempt, Job, JobCommandResult, JobExecution } from '../domain/job.js';
 
 /** Product work; one family member per Job id. */
+const jobDocument = (job: Job) => ({...job});
+
 export const Jobs = defineDocFamily({
-  kind: 'point.job', version: 1, scope: 'session', family: true,
+  kind: 'point.job', version: 2, scope: 'session', family: true,
   initial: (job: Job) => ({...job}),
+  // v2 is a versioned shape freeze: the Job fields are already stable, so migration is the identity.
+  migrate: value => value as unknown as ReturnType<typeof jobDocument>,
 });
 
 /** Execution attempts; keyed by attempt id (deterministic `${jobId}-${revision}`). */

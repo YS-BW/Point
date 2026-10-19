@@ -13,6 +13,7 @@ import {
 } from '../application/conversation.js';
 import { Chats } from '../storage/chats.js';
 import { CommandHead, CompactReceipts, CommandReceipts } from '../storage/conversation.js';
+import { indexReceipt } from './state-index.js';
 
 type Input = (ConversationCommand | CompactCommand) & {previous: number};
 type Result = {submissionId: number} | {stopped: true} | {compactionTaskId: number};
@@ -117,6 +118,10 @@ export function conversationRuntime(getHarness: () => Harness, model: ModelRef |
         conversationId, ownership: {kind: 'conversation'}, background: true,
       });
       receipt.taskId = taskId;
+      await indexReceipt(tx, {
+        family: 'point.command.compact', receiptKey: `${command.chatId}:${command.requestId}`,
+        referencedId: String(taskId), terminal: false,
+      });
       return String(taskId);
     }, context);
     h.resume();

@@ -23,6 +23,8 @@ import {
   Decisions, FollowupCommandReceipts, Occurrences, ScheduleHeads, Schedules,
 } from '../storage/schedule.js';
 import type { deliveryRuntime } from './deliveries.js';
+import { appendEvent } from './events.js';
+import { indexReceipt } from './state-index.js';
 
 /**
  * Read-only session document scan supplied by the composition root. The Harness/Session API has no
@@ -234,6 +236,11 @@ export function followupRuntime(options: FollowupRuntimeOptions) {
               createdAt: now,
             };
             await tx.doc(Decisions, decision.id, copyDecision(decision));
+            await appendEvent(tx, {
+              type: 'followup.decided', aggregate: 'schedule', aggregateId: scheduleDraft.id,
+              revision: scheduleDraft.revision, at: now,
+              data: {choice: evaluation.choice, reason: evaluation.reason, occurrences: decision.occurrenceIds.length},
+            });
 
             for (const draft of drafts) {
               draft.state = evaluation.choice === 'deliver' ? 'delivered' : 'skipped';
@@ -252,6 +259,13 @@ export function followupRuntime(options: FollowupRuntimeOptions) {
               });
               await tx.doc(Deliveries, chat.id, copyDelivery(chat));
               await tx.doc(Deliveries, notification.id, copyDelivery(notification));
+              for (const delivery of [chat, notification]) {
+                await appendEvent(tx, {
+                  type: 'delivery.intent', aggregate: 'delivery', aggregateId: delivery.id,
+                  revision: delivery.revision, at: now,
+                  data: {channel: delivery.channel, jobId: delivery.jobId},
+                });
+              }
               const taskOptions = {
                 conversationId: Number(scheduleDraft.sourceChatId) as ConversationId,
                 ownership: {kind: 'conversation' as const},
@@ -337,6 +351,15 @@ export function followupRuntime(options: FollowupRuntimeOptions) {
           background: true,
         });
         head.scheduleId = scheduleId;
+        await appendEvent(tx, {
+          type: 'schedule.created', aggregate: 'schedule', aggregateId: scheduleId,
+          revision: schedule.revision, at: now,
+          data: {jobId: schedule.jobId, occurrences: schedule.occurrenceIds.length},
+        });
+        await indexReceipt(tx, {
+          family: 'point.command.followup', receiptKey: `schedule:${command.jobId}:${command.requestId}`,
+          referencedId: scheduleId, terminal: false, createdAt: now,
+        });
         const result: ScheduleFollowupResult = {scheduleId, occurrenceIds: [...schedule.occurrenceIds]};
         receipt.result = result;
         return {scheduleId: result.scheduleId, occurrenceIds: [...result.occurrenceIds]};
@@ -365,7 +388,8 @@ export function followupRuntime(options: FollowupRuntimeOptions) {
         }
         const schedule = await tx.doc(Schedules, command.scheduleId, copySchedule(current));
         const now = Date.now();
-        if (canTransitionSchedule(schedule.status, 'cancelled')) {
+        const cancelledNow = canTransitionSchedule(schedule.status, 'cancelled');
+        if (cancelledNow) {
           schedule.status = 'cancelled';
           schedule.updatedAt = now;
           for (const id of schedule.occurrenceIds) {
@@ -378,6 +402,16 @@ export function followupRuntime(options: FollowupRuntimeOptions) {
             }
           }
         }
+        if (cancelledNow) {
+          await appendEvent(tx, {
+            type: 'schedule.cancelled', aggregate: 'schedule', aggregateId: schedule.id,
+            revision: schedule.revision, at: now, data: {jobId: schedule.jobId},
+          });
+        }
+        await indexReceipt(tx, {
+          family: 'point.command.followup', receiptKey: `cancel:${command.scheduleId}:${command.requestId}`,
+          referencedId: schedule.id, terminal: true, createdAt: now,
+        });
         const result: CancelFollowupResult = {scheduleId: schedule.id, status: schedule.status};
         receipt.result = result;
         return {scheduleId: result.scheduleId, status: result.status};

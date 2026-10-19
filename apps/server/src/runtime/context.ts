@@ -2,6 +2,8 @@ import { defineExtension, section, type Extension } from '@earendil-works/pi-dur
 import { renderProfilePrompt } from '../domain/profile.js';
 import { Chats } from '../storage/chats.js';
 import { Profile } from '../storage/profile.js';
+import { memoryEntry, type MemoryDocument } from '../storage/state.js';
+import type { SessionDocumentScanner } from './schedules.js';
 
 /**
  * Section keys. The SDK requires `^[a-z][a-z0-9_-]*$`, so the contract's `point.identity` family is
@@ -17,7 +19,7 @@ export const IDENTITY_TEXT = '你是 Point 的对话助手。保持稳定、克�
  * profile. Reads only committed documents (`pi.chat`, `point.chat`, `point.profile`); an empty profile
  * omits its section instead of rendering an empty tag.
  */
-export function contextExtension(): Extension {
+export function contextExtension(scan?: SessionDocumentScanner): Extension {
   return defineExtension({
     name: 'point.context',
     sections: [
@@ -28,6 +30,18 @@ export function contextExtension(): Extension {
         return chat ? `当前会话：${chat.name}；chatId=${chatId}。` : '当前是内部执行会话。';
       }),
       section(SECTION_KEYS.profile, async (input, context) => {
+        // v2 memory family is canonical; the legacy single map is a read-only fallback for v1 databases.
+        if (scan !== undefined) {
+          const entries = [];
+          for (const document of await scan('point.memory')) {
+            const value = document.value as Partial<MemoryDocument>;
+            if (typeof value.key !== 'string' || value.key !== document.key || typeof value.value !== 'string'
+              || (value.kind !== 'fact' && value.kind !== 'preference' && value.kind !== 'decision')
+              || typeof value.sourceChatId !== 'string' || typeof value.updatedAt !== 'number') continue;
+            entries.push(memoryEntry(value as MemoryDocument));
+          }
+          if (entries.length > 0) return renderProfilePrompt(entries);
+        }
         const profile = await input.read.snapshot(Profile, context);
         if (!profile) return undefined;
         return renderProfilePrompt(Object.values(profile.entries).map(entry => ({...entry})));

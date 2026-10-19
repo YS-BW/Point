@@ -28,6 +28,7 @@ import {
 } from '../application/artifact.js';
 import { ArtifactError, isArtifactId, isArtifactName, isArtifactOwnerId, type Artifact } from '../domain/artifact.js';
 import { Artifacts, artifactDocument, artifactFromDocument } from '../storage/artifact.js';
+import { appendEvent } from './events.js';
 
 /**
  * The subset of Harness/ToolExecutionApi this layer needs: committed document
@@ -266,10 +267,18 @@ export async function writeArtifactDocument(tx: Tx, artifact: Artifact): Promise
   }
   // A sealed document is terminal: a stale caller returns the sealed value instead
   // of downgrading it back to writing/failed.
-  if (draft.state === 'sealed') return artifactFromDocument({...draft});
+  const wasSealed = draft.state === 'sealed';
+  if (wasSealed) return artifactFromDocument({...draft});
   draft.state = artifact.state;
   draft.bytes = artifact.bytes;
   draft.sealedAt = artifact.sealedAt ?? null;
+  if (!wasSealed && artifact.state === 'sealed') {
+    await appendEvent(tx, {
+      type: 'artifact.sealed', aggregate: 'artifact', aggregateId: artifact.id,
+      revision: artifact.revision, at: artifact.sealedAt ?? Date.now(),
+      data: {jobId: artifact.jobId, attemptId: artifact.attemptId, name: artifact.name},
+    });
+  }
   return artifactFromDocument({...draft});
 }
 

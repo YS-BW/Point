@@ -188,3 +188,27 @@ const deliveries = await runtime.followups.deliveries(started.jobId);
 ### 边界与未验证项
 
 成功响应不做外层包装、无分页游标之外的读模型；`/inspect` 只报 server 身份/阶段，**Durable 计数依赖尚未实现的读模型（WP6）**。不实现 AG-UI/SSE（WP5）、多租户/OAuth/限流、批量或删除类端点。`/v1` 与真实模型/外部端点组合的端到端行为取决于 `openRuntime` 绑定与注入的 adapters；HTTP 层本身不使用模型。未验证：跨进程并发压测、真实客户端重连（属 WP5/WP6）、HTTPS 终止与反向代理、限流与审计留存。
+
+## 状态 v2 与迁移（WP3）
+
+`point.meta` 是唯一产品格式权威：`format: 2` 正常读写；legacy `point.server.meta` (`format: 1`) 在写模式下拒绝（`MIGRATION_REQUIRED`），只允许显式迁移或 `openRuntime(dir, binding?, {mode: 'read-only'})` 只读核对（读写 store 的 `commit`/`resume` 抛 `READ_ONLY`；仍必须取得 owner 锁，SQLite/WAL 层不构成 OS 级只读）。未知/更高 format、engine 不匹配、半迁移双 meta 均零写入拒绝（`UNSUPPORTED_DATA_FORMAT`/`UNRECOGNIZED_DATA`）；全新库直接创建为 format 2。
+
+v2 保留既有按实体文档族为唯一事实，新增派生读侧 family：`point.chats`/`point.jobs`/`point.resources`/`point.requests` 索引、`point.memory`（替代单文档 `point.profile`，收据保留）、`point.event` 时间线；`point.chat`/`point.job` 升 v2（identity migrate，形状与 domain 类型不变）。实体 + 索引 + 事件在同一 commit 写入；索引/事件是可重建的派生事实，删除事件不影响状态，`runtime.rebuildEvents()` 可从当前状态重建（当前覆盖 chat/job/memory/resource/artifact/schedule；attempt/delivery/operation 的完整时间线属已知限制）。
+
+迁移是显式命令（不通过 HTTP）：
+
+```js
+import { migrateRuntime } from './apps/server/src/runtime/migrate.js';
+const result = await migrateRuntime(dataDir); // {status:'migrated'|'already-migrated'|'initialized', backupPath?, counts?}
+```
+
+流程：owner 单写者锁 → SDK storage preflight → 格式检测 → 在线备份 `<dataDir>/backups/pre-migration-<ts>.sqlite`（Node `node:sqlite` 的 SQLite backup API，不复制 WAL；失败 `MIGRATION_BACKUP_FAILED` 且格式不变）→ **一个 Durable commit** 完成全部重写、索引/memory 回填、`point.requests` 回填与一条 `state.migrated` 事件。已是 format 2 时返回 `already-migrated`（不备份、不重写）；提交前 SIGKILL 可重跑，提交后 SIGKILL 重启即 format 2。回滚：停写后用备份覆盖 `state.sqlite`（移除 `-wal`/`-shm`），先只读核对，需要时再迁移；恢复后不重放任何 `unknown`。
+
+请求账本清扫：
+
+```js
+const report = await runtime.cleanupReceipts({keepMs: 30 * 24 * 60 * 60 * 1000, keepCount: 10_000, dryRun: true});
+// {scanned, removed, kept, dryRun, reasons, removedKeys}
+```
+
+默认 30 天 / 10k 条、单次最多 1000 条；最近 `keepCount` 条与未过 `keepMs` 的收据保留。保护规则：active job、active schedule、`attempting`/未核销 `unknown` operation、无法解析引用（fail-closed）永不删除；保护判定在删除 commit 内对已提交状态重新校验。只读 runtime 调用清扫抛 `READ_ONLY`。事件/索引均为派生数据；备份保留策略、大库迁移耗时、原型 HTTP/真实读模型不在本片。设计见 [状态 v2](../../docs/design/state-v2.md)，证据数字由 Lead 统一维护。
