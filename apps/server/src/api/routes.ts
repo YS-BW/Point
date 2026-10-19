@@ -43,7 +43,8 @@ export type Route = Readonly<{
   handle(context: RouteContext): Promise<unknown>;
 }>;
 
-const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+/** Frozen contract: 8..128 characters, matching the documented minimum. */
+const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 function header(request: IncomingMessage, name: string): string | undefined {
   const value = request.headers[name];
@@ -54,7 +55,9 @@ function header(request: IncomingMessage, name: string): string | undefined {
 export function idempotencyKey(request: IncomingMessage): string {
   const key = header(request, 'idempotency-key');
   if (key === undefined) throw new ApiError(400, 'INVALID_COMMAND', 'Idempotency-Key is required');
-  if (!IDEMPOTENCY_PATTERN.test(key)) throw new ApiError(400, 'INVALID_COMMAND', 'invalid Idempotency-Key');
+  if (!IDEMPOTENCY_PATTERN.test(key)) {
+    throw new ApiError(400, 'INVALID_COMMAND', 'Idempotency-Key must be 8..128 characters');
+  }
   return key;
 }
 
